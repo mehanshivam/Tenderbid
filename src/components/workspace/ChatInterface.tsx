@@ -2,7 +2,7 @@
 
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useMemo } from "react";
 import { Send, Bot, User, FileText } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -46,14 +46,20 @@ export function ChatInterface({ tenderId, documentContext, onCitationClick }: Ch
   const scrollRef = useRef<HTMLDivElement>(null);
   const [inputValue, setInputValue] = useState("");
 
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport({
+        api: "/api/chat",
+        body: {
+          tenderId,
+          documentContext,
+        },
+      }),
+    [tenderId, documentContext]
+  );
+
   const { messages, sendMessage, status, error } = useChat({
-    transport: new DefaultChatTransport({
-      api: "/api/chat",
-      body: {
-        tenderId,
-        documentContext,
-      },
-    }),
+    transport,
     onError: (err) => {
       console.error("Chat error:", err);
     },
