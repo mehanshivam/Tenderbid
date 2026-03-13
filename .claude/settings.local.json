@@ -21,7 +21,16 @@
       "Bash(mv alpha-v1/* alpha-v1/.* .)",
       "Bash(rmdir alpha-v1:*)",
       "Bash(npm install:*)",
-      "Bash(npx shadcn@latest init -d)"
+      "Bash(npx shadcn@latest init -d)",
+      "Bash(npx shadcn@latest add input badge select scroll-area skeleton separator sheet dialog popover -y)",
+      "Bash(npx shadcn@latest add resizable -y)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(node -e \"const pkg = require\\(''ai/package.json''\\); console.log\\(pkg.version\\); console.log\\(Object.keys\\(pkg.exports || {}\\).join\\('', ''\\)\\)\")",
+      "Bash(node -e \"const { streamText } = require\\(''''ai''''\\); console.log\\(typeof streamText\\)\")",
+      "Bash(node -e \":*)",
+      "Bash(node -e \"const m = require\\(''@tiptap/extension-table''\\); console.log\\(Object.keys\\(m\\).join\\('', ''\\)\\)\")",
+      "Bash(node -e \"require\\(''zustand''\\); console.log\\(''installed''\\)\")",
+      "Bash(vercel --version)"
     ]
   }
 }
