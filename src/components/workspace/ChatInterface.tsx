@@ -1,6 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import { DefaultChatTransport } from "ai";
 import { useRef, useEffect, useState } from "react";
 import { Send, Bot, User, FileText } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -46,11 +47,13 @@ export function ChatInterface({ tenderId, documentContext, onCitationClick }: Ch
   const [inputValue, setInputValue] = useState("");
 
   const { messages, sendMessage, status, error } = useChat({
-    api: "/api/chat",
-    body: {
-      tenderId,
-      documentContext,
-    },
+    transport: new DefaultChatTransport({
+      api: "/api/chat",
+      body: {
+        tenderId,
+        documentContext,
+      },
+    }),
     onError: (err) => {
       console.error("Chat error:", err);
     },
@@ -69,9 +72,7 @@ export function ChatInterface({ tenderId, documentContext, onCitationClick }: Ch
     const text = inputValue.trim();
     if (!text || isLoading) return;
     setInputValue("");
-    sendMessage({ role: "user", content: text }, {
-      body: { tenderId, documentContext },
-    });
+    sendMessage({ text });
   };
 
   return (

@@ -13,7 +13,7 @@ function buildQueryString(params: Record<string, unknown>): string {
 }
 
 export async function fetchTenders(filters: TenderFilters = {}): Promise<TenderListResponse> {
-  const qs = buildQueryString(filters);
+  const qs = buildQueryString(filters as Record<string, unknown>);
   const res = await fetch(`${API_BASE}/tenders${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(`Failed to fetch tenders: ${res.status}`);
   return res.json();

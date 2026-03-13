@@ -32,7 +32,7 @@ export async function POST(req: Request) {
 
     const safeName = (filename || "document").replace(/[^a-zA-Z0-9_-]/g, "_");
 
-    return new Response(docxBuffer as Buffer, {
+    return new Response(docxBuffer as unknown as BodyInit, {
       headers: {
         "Content-Type":
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
