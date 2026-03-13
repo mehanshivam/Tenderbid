@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:156.67.104.82)",
+      "Bash(curl -s http://156.67.104.82/api/tenders?per_page=1)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s http://156.67.104.82/api/stats/overview)",
+      "Bash(curl -s http://156.67.104.82/api/tenders/portals)",
+      "Bash(curl -s http://156.67.104.82/api/tenders/stats)",
+      "Bash(curl -s \"http://156.67.104.82/api/tenders?per_page=1&sort_by=closing_date&sort_order=asc\")",
+      "Bash(curl -s http://156.67.104.82/api/tenders/1705593/documents)",
+      "Bash(curl -s http://156.67.104.82/api/tenders/1682503/documents)",
+      "Bash(curl -s http://156.67.104.82/api/tenders/1682503)",
+      "Bash(curl -sI http://156.67.104.82/api/tenders/documents/33225/download)",
+      "Bash(curl -s http://156.67.104.82/api/tenders/1682503/corrigendums)",
+      "Bash(curl -s \"http://156.67.104.82/api/tenders/search?keyword=road&per_page=1\")",
+      "Bash(curl -sI -X GET http://156.67.104.82/api/tenders/documents/33225/download)",
+      "Bash(npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --turbopack)",
+      "Bash(npx create-next-app@latest alpha-v1 --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm --turbopack)",
+      "Bash(shopt -s dotglob)",
+      "Bash(mv alpha-v1/* alpha-v1/.* .)",
+      "Bash(rmdir alpha-v1:*)",
+      "Bash(npm install:*)",
+      "Bash(npx shadcn@latest init -d)"
+    ]
+  }
+}
