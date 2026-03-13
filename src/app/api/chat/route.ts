@@ -1,10 +1,10 @@
-import { streamText } from "ai";
+import { streamText, type UIMessage, convertToModelMessages } from "ai";
 import { google } from "@ai-sdk/google";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://156.67.104.82";
 
 export async function POST(req: Request) {
-  const { messages, tenderId, documentContext } = await req.json();
+  const { messages: rawMessages, tenderId, documentContext } = await req.json();
 
   // Fetch tender details for context
   let tenderContext = "";
@@ -50,10 +50,12 @@ IMPORTANT CITATION RULES:
 
 Format your responses in clear markdown.`;
 
+  const coreMessages = await convertToModelMessages(rawMessages as UIMessage[]);
+
   const result = streamText({
     model: google("gemini-2.5-flash"),
     system: systemPrompt,
-    messages,
+    messages: coreMessages,
   });
 
   return result.toUIMessageStreamResponse();
