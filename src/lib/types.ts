@@ -115,6 +115,29 @@ export interface UploadedFile {
   blobUrl: string;
 }
 
+export interface VaultDocument {
+  id: string;
+  name: string;
+  category: string;
+  fileType: string;
+  fileSize: number;
+  base64Data: string;
+  uploadedAt: string;
+}
+
+export const VAULT_CATEGORIES = [
+  "Registration Certificates",
+  "Financial Documents",
+  "Experience",
+  "Work Orders (LOA/WO)",
+  "Firm Profile",
+  "Rent Agreements",
+  "Net Worth",
+  "Other",
+] as const;
+
+export type VaultCategory = (typeof VAULT_CATEGORIES)[number];
+
 export interface ExtractedForm {
   id: string;
   title: string;

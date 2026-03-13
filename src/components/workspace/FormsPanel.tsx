@@ -209,7 +209,7 @@ export function FormsPanel({ documentText, onCitationClick }: FormsPanelProps) {
       </div>
 
       {/* Forms */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex-1 overflow-auto p-3 space-y-3">
         {forms.map((form) => (
           <div key={form.id} data-form-id={form.id}>
             <FormEditor form={form} onCitationClick={onCitationClick} />

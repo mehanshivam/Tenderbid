@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   Bookmark,
   Upload,
+  Building2,
   Menu,
   X,
 } from "lucide-react";
@@ -137,6 +138,21 @@ export function Sidebar() {
               </div>
             )}
           </div>
+
+          {/* Company Vault */}
+          <Link
+            href="/vault"
+            onClick={() => setMobileOpen(false)}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors",
+              pathname.startsWith("/vault")
+                ? "bg-indigo-500/20 text-indigo-300"
+                : "text-slate-300 hover:bg-slate-800 hover:text-white"
+            )}
+          >
+            <Building2 size={18} />
+            Company Vault
+          </Link>
 
           {/* Upload Tender */}
           <Link

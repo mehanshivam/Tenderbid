@@ -49,7 +49,7 @@ export function FormEditor({ form, onCitationClick }: FormEditorProps) {
     editorProps: {
       attributes: {
         class:
-          "prose prose-sm max-w-none focus:outline-none min-h-[100px] px-3 py-2",
+          "prose prose-sm max-w-none focus:outline-none min-h-[100px] px-3 py-2 [&_table]:table-auto [&_table]:w-full [&_td]:break-words [&_th]:break-words",
       },
     },
   });
@@ -120,6 +120,23 @@ export function FormEditor({ form, onCitationClick }: FormEditorProps) {
               )}
             </div>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-6 text-[10px] gap-1 px-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDownload();
+            }}
+            disabled={downloading}
+          >
+            {downloading ? (
+              <Loader2 size={10} className="animate-spin" />
+            ) : (
+              <Download size={10} />
+            )}
+            DOCX
+          </Button>
           {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
         </div>
       </div>
@@ -171,7 +188,7 @@ export function FormEditor({ form, onCitationClick }: FormEditorProps) {
           </div>
 
           {/* Editor */}
-          <div className="max-h-[400px] overflow-y-auto">
+          <div className="max-h-[400px] overflow-auto">
             <EditorContent editor={editor} />
           </div>
         </>
