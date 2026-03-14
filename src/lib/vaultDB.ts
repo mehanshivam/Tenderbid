@@ -127,6 +127,15 @@ export async function getCompanyProfile(): Promise<CompanyProfile | null> {
   return profile ?? null;
 }
 
+// ─── Clear All Data ───
+
+export async function clearAllData(): Promise<void> {
+  const db = await getDB();
+  if (!db) return;
+  await db.clear(FILES_STORE);
+  await db.clear(PROFILE_STORE);
+}
+
 // ─── Storage Estimate ───
 
 export async function getStorageEstimate(): Promise<{
