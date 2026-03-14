@@ -145,3 +145,72 @@ export interface ExtractedForm {
   sourcePages: number[];
   contentHtml: string;
 }
+
+// ─── Vault v2 Types (IndexedDB-backed) ───
+
+export type ExtractionStatus = "pending" | "extracting" | "done" | "failed";
+
+export interface VaultDocumentMeta {
+  id: string;
+  name: string;
+  category: VaultCategory;
+  fileType: string;
+  fileSize: number;
+  uploadedAt: string;
+  extractionStatus: ExtractionStatus;
+}
+
+export interface ExtractedMetadata {
+  companyName?: string;
+  pan?: string;
+  gstin?: string;
+  registeredAddress?: string;
+  partners?: string[];
+  turnover?: { year: string; amount: string }[];
+  pastProjects?: {
+    name: string;
+    client: string;
+    value: string;
+    year: string;
+  }[];
+  certifications?: string[];
+  rawSummary?: string;
+}
+
+export interface CompanyProfile {
+  companyName: string;
+  pan: string;
+  gstin: string;
+  registeredAddress: string;
+  partners: string[];
+  turnoverHistory: { year: string; amount: string }[];
+  totalProjects: number;
+  pastProjects: {
+    name: string;
+    client: string;
+    value: string;
+    year: string;
+  }[];
+  certifications: string[];
+  lastUpdated: string;
+}
+
+/** Maps common folder names to vault categories for auto-categorization */
+export const FOLDER_CATEGORY_MAP: Record<string, VaultCategory> = {
+  "registration certificate": "Registration Certificates",
+  "registration certificates": "Registration Certificates",
+  "financial document": "Financial Documents",
+  "financial documents": "Financial Documents",
+  experience: "Experience",
+  "individual_form_event": "Experience",
+  "loa&wo": "Work Orders (LOA/WO)",
+  loa: "Work Orders (LOA/WO)",
+  "work order": "Work Orders (LOA/WO)",
+  "work orders": "Work Orders (LOA/WO)",
+  "firm profile": "Firm Profile",
+  profile: "Firm Profile",
+  "rent agreement": "Rent Agreements",
+  "rent agreements": "Rent Agreements",
+  "net worth": "Net Worth",
+  networth: "Net Worth",
+};

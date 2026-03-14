@@ -1,29 +1,67 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { VaultDocument } from "@/lib/types";
+import type {
+  VaultDocumentMeta,
+  CompanyProfile,
+  ExtractionStatus,
+  VaultCategory,
+  ExtractedMetadata,
+} from "@/lib/types";
+import { deleteFile as deleteFromDB } from "@/lib/vaultDB";
 
 interface VaultState {
-  documents: VaultDocument[];
-  addDocument: (doc: VaultDocument) => void;
+  documents: VaultDocumentMeta[];
+  companyProfile: CompanyProfile | null;
+  isHydrated: boolean;
+
+  // Document actions
+  addDocument: (doc: VaultDocumentMeta) => void;
+  addDocuments: (docs: VaultDocumentMeta[]) => void;
   removeDocument: (id: string) => void;
-  getByCategory: (category: string) => VaultDocument[];
-  updateCategory: (id: string, category: string) => void;
-  storageUsed: () => number;
+  updateExtractionStatus: (
+    id: string,
+    status: ExtractionStatus,
+    metadata?: ExtractedMetadata
+  ) => void;
+  updateCategory: (id: string, category: VaultCategory) => void;
+  getByCategory: (category: string) => VaultDocumentMeta[];
+
+  // Profile actions
+  setCompanyProfile: (profile: CompanyProfile) => void;
+
+  // Hydration
+  setHydrated: () => void;
 }
 
 export const useVaultStore = create<VaultState>()(
   persist(
     (set, get) => ({
       documents: [],
+      companyProfile: null,
+      isHydrated: false,
+
       addDocument: (doc) => {
         set({ documents: [...get().documents, doc] });
       },
+
+      addDocuments: (docs) => {
+        set({ documents: [...get().documents, ...docs] });
+      },
+
       removeDocument: (id) => {
+        // Also remove blob from IndexedDB
+        deleteFromDB(id).catch(console.error);
         set({ documents: get().documents.filter((d) => d.id !== id) });
       },
-      getByCategory: (category) => {
-        return get().documents.filter((d) => d.category === category);
+
+      updateExtractionStatus: (id, status) => {
+        set({
+          documents: get().documents.map((d) =>
+            d.id === id ? { ...d, extractionStatus: status } : d
+          ),
+        });
       },
+
       updateCategory: (id, category) => {
         set({
           documents: get().documents.map((d) =>
@@ -31,10 +69,24 @@ export const useVaultStore = create<VaultState>()(
           ),
         });
       },
-      storageUsed: () => {
-        return get().documents.reduce((acc, d) => acc + d.base64Data.length, 0);
+
+      getByCategory: (category) => {
+        return get().documents.filter((d) => d.category === category);
+      },
+
+      setCompanyProfile: (profile) => {
+        set({ companyProfile: profile });
+      },
+
+      setHydrated: () => {
+        set({ isHydrated: true });
       },
     }),
-    { name: "company-vault-storage" }
+    {
+      name: "company-vault-meta",
+      onRehydrateStorage: () => (state) => {
+        state?.setHydrated();
+      },
+    }
   )
 );
