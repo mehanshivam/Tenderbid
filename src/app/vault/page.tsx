@@ -170,6 +170,325 @@ interface PendingCategorization {
   confidence: "high" | "medium" | "low";
 }
 
+// Document detail popup component
+function DocumentDetailPopup({
+  doc,
+  onClose,
+  onDelete,
+  onRetry,
+}: {
+  doc: VaultDocumentMeta;
+  onClose: () => void;
+  onDelete: (id: string) => void;
+  onRetry: (id: string) => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [metadata, setMetadata] = useState<ExtractedMetadata | null>(null);
+  const [loadingMeta, setLoadingMeta] = useState(true);
+
+  useEffect(() => {
+    // Load blob for preview
+    getFile(doc.id).then((blob) => {
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        setPreviewUrl(url);
+        return () => URL.revokeObjectURL(url);
+      }
+    });
+    // Load metadata
+    getMetadata(doc.id).then((meta) => {
+      setMetadata(meta || null);
+      setLoadingMeta(false);
+    });
+  }, [doc.id]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const handleDownload = () => {
+    if (!previewUrl) return;
+    const a = document.createElement("a");
+    a.href = previewUrl;
+    a.download = doc.name;
+    a.click();
+  };
+
+  const ext = doc.name.split(".").pop()?.toLowerCase() || "";
+  const isPdf = ext === "pdf";
+  const isImage = ["jpg", "jpeg", "png"].includes(ext);
+
+  const hasAnyMeta =
+    metadata &&
+    (metadata.companyName ||
+      metadata.pan ||
+      metadata.gstin ||
+      metadata.registeredAddress ||
+      (metadata.partners && metadata.partners.length > 0) ||
+      (metadata.turnover && metadata.turnover.length > 0) ||
+      (metadata.pastProjects && metadata.pastProjects.length > 0) ||
+      (metadata.certifications && metadata.certifications.length > 0));
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-slate-700 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 bg-slate-700/50 rounded-lg shrink-0">
+              {getFileIcon(doc.name)}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white truncate">
+                {doc.name}
+              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-slate-400">
+                  {getFileExtension(doc.name)}
+                </span>
+                <span className="text-xs text-slate-500">
+                  {formatFileSize(doc.fileSize)}
+                </span>
+                <span className="text-xs text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full">
+                  {doc.category}
+                </span>
+                <ExtractionBadge status={doc.extractionStatus} />
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 ml-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownload}
+              disabled={!previewUrl}
+              className="border-slate-600 text-slate-300 hover:bg-slate-700"
+            >
+              <Eye size={14} className="mr-1.5" />
+              Download
+            </Button>
+            {doc.extractionStatus === "failed" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onRetry(doc.id)}
+                className="border-amber-600 text-amber-400 hover:bg-amber-500/10"
+              >
+                <RefreshCw size={14} className="mr-1.5" />
+                Retry
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onDelete(doc.id);
+                onClose();
+              }}
+              className="border-red-800 text-red-400 hover:bg-red-500/10"
+            >
+              <Trash2 size={14} className="mr-1.5" />
+              Delete
+            </Button>
+            <button
+              onClick={onClose}
+              className="p-1.5 hover:bg-slate-700 rounded-lg text-slate-400"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Body — split: preview left, metadata right */}
+        <div className="flex-1 overflow-hidden flex">
+          {/* Preview */}
+          <div className="flex-1 overflow-auto bg-slate-900/50 flex items-center justify-center p-4">
+            {!previewUrl ? (
+              <div className="text-slate-500 text-center">
+                <Loader2 size={32} className="mx-auto mb-2 animate-spin" />
+                <p className="text-sm">Loading preview...</p>
+              </div>
+            ) : isPdf ? (
+              <iframe
+                src={previewUrl}
+                className="w-full h-full min-h-[400px] rounded-lg border border-slate-700"
+                title={doc.name}
+              />
+            ) : isImage ? (
+              <img
+                src={previewUrl}
+                alt={doc.name}
+                className="max-w-full max-h-full object-contain rounded-lg"
+              />
+            ) : (
+              <div className="text-center text-slate-500">
+                <File size={48} className="mx-auto mb-3 opacity-50" />
+                <p className="text-sm">Preview not available for this file type</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownload}
+                  className="mt-3 border-slate-600 text-slate-300"
+                >
+                  Download to view
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Metadata sidebar */}
+          <div className="w-80 border-l border-slate-700 overflow-y-auto p-4 shrink-0">
+            <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+              <Sparkles size={14} className="text-indigo-400" />
+              AI Extracted Metadata
+            </h3>
+
+            {loadingMeta ? (
+              <div className="flex items-center gap-2 text-slate-500 text-sm">
+                <Loader2 size={14} className="animate-spin" />
+                Loading...
+              </div>
+            ) : !hasAnyMeta ? (
+              <p className="text-sm text-slate-500">
+                {doc.extractionStatus === "pending" || doc.extractionStatus === "extracting"
+                  ? "Extraction in progress..."
+                  : doc.extractionStatus === "failed"
+                    ? "Extraction failed. Try again with the Retry button."
+                    : ext !== "pdf"
+                      ? "Metadata extraction is only available for PDF files."
+                      : "No metadata could be extracted from this document."}
+              </p>
+            ) : (
+              <div className="space-y-4">
+                {metadata?.companyName && (
+                  <MetaField label="Company Name" value={metadata.companyName} />
+                )}
+                {metadata?.pan && (
+                  <MetaField label="PAN" value={metadata.pan} mono />
+                )}
+                {metadata?.gstin && (
+                  <MetaField label="GSTIN" value={metadata.gstin} mono />
+                )}
+                {metadata?.registeredAddress && (
+                  <MetaField label="Address" value={metadata.registeredAddress} />
+                )}
+                {metadata?.partners && metadata.partners.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1.5">
+                      Partners / Directors
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {metadata.partners.map((p) => (
+                        <span
+                          key={p}
+                          className="text-xs px-2 py-0.5 bg-slate-700 text-slate-300 rounded-full"
+                        >
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {metadata?.turnover && metadata.turnover.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1.5">
+                      Turnover
+                    </p>
+                    <div className="space-y-1">
+                      {metadata.turnover.map((t) => (
+                        <div
+                          key={t.year}
+                          className="flex justify-between text-xs bg-slate-700/50 rounded px-2 py-1.5"
+                        >
+                          <span className="text-slate-400">{t.year}</span>
+                          <span className="text-white font-medium">
+                            {t.amount}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {metadata?.pastProjects && metadata.pastProjects.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1.5">
+                      Projects ({metadata.pastProjects.length})
+                    </p>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                      {metadata.pastProjects.map((proj, i) => (
+                        <div
+                          key={i}
+                          className="bg-slate-700/30 rounded px-2.5 py-1.5"
+                        >
+                          <p className="text-xs text-white font-medium truncate">
+                            {proj.name}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {proj.client} &bull; {proj.value}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {metadata?.certifications &&
+                  metadata.certifications.length > 0 && (
+                    <div>
+                      <p className="text-xs text-slate-500 uppercase tracking-wide mb-1.5">
+                        Certifications
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {metadata.certifications.map((c) => (
+                          <span
+                            key={c}
+                            className="text-xs px-2 py-0.5 bg-emerald-900/30 text-emerald-400 border border-emerald-800/50 rounded-full"
+                          >
+                            {c}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                {metadata?.suggestedCategory && (
+                  <MetaField
+                    label="AI Category"
+                    value={`${metadata.suggestedCategory} (${metadata.categoryConfidence || "medium"} confidence)`}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetaField({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-slate-500 uppercase tracking-wide mb-0.5">
+        {label}
+      </p>
+      <p className={cn("text-sm text-white", mono && "font-mono")}>{value}</p>
+    </div>
+  );
+}
+
 export default function VaultPage() {
   const {
     documents,
@@ -184,6 +503,7 @@ export default function VaultPage() {
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [showUpload, setShowUpload] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [selectedDoc, setSelectedDoc] = useState<VaultDocumentMeta | null>(null);
   const [uploadProgress, setUploadProgress] = useState<{
     current: number;
     total: number;
@@ -386,20 +706,9 @@ export default function VaultPage() {
     [processExtractionQueue]
   );
 
-  const handlePreview = async (doc: VaultDocumentMeta) => {
-    try {
-      const blob = await getFile(doc.id);
-      if (!blob) {
-        alert("File not found in storage.");
-        return;
-      }
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
-    } catch (err) {
-      console.error("Preview failed:", err);
-    }
-  };
+  const handleOpenDetail = useCallback((doc: VaultDocumentMeta) => {
+    setSelectedDoc(doc);
+  }, []);
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -670,8 +979,9 @@ export default function VaultPage() {
             return (
               <div
                 key={doc.id}
+                onClick={() => handleOpenDetail(doc)}
                 className={cn(
-                  "bg-slate-800/50 border rounded-xl p-4 transition-colors group",
+                  "bg-slate-800/50 border rounded-xl p-4 transition-colors group cursor-pointer",
                   pending
                     ? "border-indigo-500/40"
                     : "border-slate-700 hover:border-slate-600"
@@ -709,7 +1019,7 @@ export default function VaultPage() {
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                     {doc.extractionStatus === "failed" && (
                       <button
-                        onClick={() => handleRetryExtraction(doc.id)}
+                        onClick={(e) => { e.stopPropagation(); handleRetryExtraction(doc.id); }}
                         className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 rounded-lg transition-colors"
                         title="Retry extraction"
                       >
@@ -717,14 +1027,14 @@ export default function VaultPage() {
                       </button>
                     )}
                     <button
-                      onClick={() => handlePreview(doc)}
+                      onClick={(e) => { e.stopPropagation(); handleOpenDetail(doc); }}
                       className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors"
-                      title="Preview / Download"
+                      title="Preview & Metadata"
                     >
                       <Eye size={14} />
                     </button>
                     <button
-                      onClick={() => removeDocument(doc.id)}
+                      onClick={(e) => { e.stopPropagation(); removeDocument(doc.id); }}
                       className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                       title="Delete"
                     >
@@ -748,6 +1058,16 @@ export default function VaultPage() {
             );
           })}
         </div>
+      )}
+
+      {/* Document detail popup */}
+      {selectedDoc && (
+        <DocumentDetailPopup
+          doc={selectedDoc}
+          onClose={() => setSelectedDoc(null)}
+          onDelete={(id) => { removeDocument(id); setSelectedDoc(null); }}
+          onRetry={handleRetryExtraction}
+        />
       )}
 
       {/* Upload modal — no category picker, AI handles it */}
