@@ -61,6 +61,40 @@ const metadataSchema = z.object({
     .describe(
       "Certifications like ISO, UDYAM, MSME, or any quality/registration certificates"
     ),
+  suggestedCategory: z
+    .enum([
+      "Registration Certificates",
+      "Financial Documents",
+      "Experience",
+      "Work Orders (LOA/WO)",
+      "Firm Profile",
+      "Rent Agreements",
+      "Net Worth",
+      "Other",
+    ])
+    .describe(
+      "The BEST category for this document based on its content. PAN/GST/Partnership Deed/UDYAM/ISO → Registration Certificates. Balance sheets/ITR/Turnover certs → Financial Documents. Work completion certs/appreciation letters → Experience. LOAs/Work orders/Contracts → Work Orders (LOA/WO). Company brochure/capability statement → Firm Profile. Rent/lease agreements → Rent Agreements. Net worth certificates → Net Worth."
+    ),
+  categoryConfidence: z
+    .enum(["high", "medium", "low"])
+    .describe("How confident you are in the category suggestion"),
+  alternateCategories: z
+    .array(
+      z.enum([
+        "Registration Certificates",
+        "Financial Documents",
+        "Experience",
+        "Work Orders (LOA/WO)",
+        "Firm Profile",
+        "Rent Agreements",
+        "Net Worth",
+        "Other",
+      ])
+    )
+    .max(2)
+    .describe(
+      "Up to 2 alternative categories that could also fit this document"
+    ),
 });
 
 export async function POST(req: Request) {
@@ -104,7 +138,20 @@ EXTRACTION RULES:
 7. If a field is not present in this document, omit it (do not return empty strings)
 8. Return amounts in their original format (e.g., "Rs. 3,45,67,890" or "Rs. 3.46 Crore")
 
-Extract everything you can find. This data will be used to build a company profile for bid preparation.`,
+Extract everything you can find. This data will be used to build a company profile for bid preparation.
+
+CATEGORY CLASSIFICATION:
+You MUST also classify this document into one of these categories:
+- "Registration Certificates" — PAN card, GST certificate, partnership deed, UDYAM registration, ISO certificate, company registration
+- "Financial Documents" — Balance sheets, P&L statements, ITR, CA-certified turnover certificates, bank statements
+- "Experience" — Work completion certificates, appreciation letters, performance certificates, experience summaries
+- "Work Orders (LOA/WO)" — Letters of Award, work orders, contracts, purchase orders, appointment letters for projects
+- "Firm Profile" — Company brochure, capability statement, about us document, organizational chart
+- "Rent Agreements" — Office rent/lease agreements, property agreements
+- "Net Worth" — Net worth certificates, CA-certified net worth statements
+- "Other" — Anything that doesn't clearly fit above
+
+Provide your best category, confidence level, and up to 2 alternatives.`,
     });
 
     return Response.json(result.object);

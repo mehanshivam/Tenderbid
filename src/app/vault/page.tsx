@@ -17,6 +17,7 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useVaultStore } from "@/store/vaultStore";
@@ -27,14 +28,22 @@ import {
   type VaultDocumentMeta,
   type ExtractedMetadata,
 } from "@/lib/types";
-import { formatFileSize, formatDate } from "@/lib/format";
+import { formatFileSize } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { saveFile, getFile, saveMetadata, getAllMetadata, saveCompanyProfile } from "@/lib/vaultDB";
+import {
+  saveFile,
+  getFile,
+  saveMetadata,
+  getAllMetadata,
+  getMetadata,
+  saveCompanyProfile,
+} from "@/lib/vaultDB";
 import { migrateVaultIfNeeded } from "@/lib/vaultMigration";
 import { extractTextFromBlob } from "@/lib/extractText";
 import { aggregateProfile } from "@/lib/aggregateProfile";
 
-const ACCEPTED_TYPES = ".pdf,.doc,.docx,.xls,.xlsx,.csv,.zip,.rar,.jpg,.jpeg,.png";
+const ACCEPTED_TYPES =
+  ".pdf,.doc,.docx,.xls,.xlsx,.csv,.zip,.rar,.jpg,.jpeg,.png";
 
 function getFileIcon(name: string) {
   const ext = name.split(".").pop()?.toLowerCase() || "";
@@ -54,10 +63,10 @@ function getFileExtension(name: string): string {
 
 /** Detect vault category from folder path in webkitRelativePath */
 function detectCategory(file: File): VaultCategory | null {
-  const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  const path = (file as File & { webkitRelativePath?: string })
+    .webkitRelativePath;
   if (!path) return null;
   const parts = path.split("/");
-  // Check from deepest subfolder up to root
   for (let i = parts.length - 2; i >= 0; i--) {
     const folder = parts[i].toLowerCase().trim();
     if (FOLDER_CATEGORY_MAP[folder]) {
@@ -67,18 +76,22 @@ function detectCategory(file: File): VaultCategory | null {
   return null;
 }
 
-function ExtractionBadge({ status }: { status: VaultDocumentMeta["extractionStatus"] }) {
+function ExtractionBadge({
+  status,
+}: {
+  status: VaultDocumentMeta["extractionStatus"];
+}) {
   switch (status) {
     case "extracting":
       return (
         <span className="flex items-center gap-1 text-xs text-amber-400">
-          <Loader2 size={12} className="animate-spin" /> Extracting
+          <Loader2 size={12} className="animate-spin" /> Classifying...
         </span>
       );
     case "done":
       return (
         <span className="flex items-center gap-1 text-xs text-emerald-400">
-          <CheckCircle2 size={12} /> Extracted
+          <CheckCircle2 size={12} /> Ready
         </span>
       );
     case "failed":
@@ -90,26 +103,86 @@ function ExtractionBadge({ status }: { status: VaultDocumentMeta["extractionStat
     default:
       return (
         <span className="flex items-center gap-1 text-xs text-slate-500">
-          <div className="w-2 h-2 rounded-full bg-slate-500" /> Pending
+          <Loader2 size={12} className="animate-spin" /> Queued
         </span>
       );
   }
+}
+
+/** Category suggestion banner shown on cards after AI extraction */
+function CategorySuggestion({
+  docId,
+  suggested,
+  alternates,
+  confidence,
+  onAccept,
+  onDismiss,
+}: {
+  docId: string;
+  suggested: VaultCategory;
+  alternates: VaultCategory[];
+  confidence: string;
+  onAccept: (docId: string, category: VaultCategory) => void;
+  onDismiss: (docId: string) => void;
+}) {
+  const allOptions = [suggested, ...alternates.filter((a) => a !== suggested)];
+
+  return (
+    <div className="mt-2 pt-2 border-t border-indigo-500/20 bg-indigo-500/5 -mx-4 -mb-4 px-4 pb-3 rounded-b-xl">
+      <div className="flex items-center gap-1.5 mb-2">
+        <Sparkles size={12} className="text-indigo-400" />
+        <span className="text-xs text-indigo-300 font-medium">
+          AI suggests:
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {allOptions.map((cat, i) => (
+          <button
+            key={cat}
+            onClick={() => onAccept(docId, cat)}
+            className={cn(
+              "text-xs px-2.5 py-1 rounded-full transition-colors",
+              i === 0
+                ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30"
+                : "bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-300"
+            )}
+          >
+            {cat}
+            {i === 0 && confidence === "high" && " ✓"}
+          </button>
+        ))}
+        <button
+          onClick={() => onDismiss(docId)}
+          className="text-xs px-2 py-1 text-slate-500 hover:text-slate-400"
+        >
+          Skip
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Track which docs need category confirmation
+interface PendingCategorization {
+  docId: string;
+  suggested: VaultCategory;
+  alternates: VaultCategory[];
+  confidence: "high" | "medium" | "low";
 }
 
 export default function VaultPage() {
   const {
     documents,
     companyProfile,
-    addDocument,
     addDocuments,
     removeDocument,
     updateExtractionStatus,
+    updateCategory,
     setCompanyProfile,
   } = useVaultStore();
 
   const [activeCategory, setActiveCategory] = useState<string>("All");
   const [showUpload, setShowUpload] = useState(false);
-  const [uploadCategory, setUploadCategory] = useState<VaultCategory>(VAULT_CATEGORIES[0]);
   const [dragOver, setDragOver] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<{
     current: number;
@@ -118,6 +191,9 @@ export default function VaultPage() {
   } | null>(null);
   const [showProjects, setShowProjects] = useState(false);
   const [refreshingProfile, setRefreshingProfile] = useState(false);
+  const [pendingCategories, setPendingCategories] = useState<
+    PendingCategorization[]
+  >([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const extractionQueueRef = useRef<string[]>([]);
@@ -139,6 +215,20 @@ export default function VaultPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ─── Category Confirmation Handlers ───
+
+  const handleAcceptCategory = useCallback(
+    (docId: string, category: VaultCategory) => {
+      updateCategory(docId, category);
+      setPendingCategories((prev) => prev.filter((p) => p.docId !== docId));
+    },
+    [updateCategory]
+  );
+
+  const handleDismissCategory = useCallback((docId: string) => {
+    setPendingCategories((prev) => prev.filter((p) => p.docId !== docId));
+  }, []);
+
   // ─── Metadata Extraction Queue ───
 
   const processExtractionQueue = useCallback(async () => {
@@ -146,17 +236,17 @@ export default function VaultPage() {
     isExtractingRef.current = true;
 
     while (extractionQueueRef.current.length > 0) {
-      // Process up to 3 concurrently
       const batch = extractionQueueRef.current.splice(0, 3);
 
       await Promise.allSettled(
         batch.map(async (docId) => {
-          const doc = useVaultStore.getState().documents.find((d) => d.id === docId);
+          const doc = useVaultStore
+            .getState()
+            .documents.find((d) => d.id === docId);
           if (!doc) return;
 
           const ext = doc.name.split(".").pop()?.toLowerCase() || "";
           if (ext !== "pdf") {
-            // Non-PDF: mark as done with no metadata
             updateExtractionStatus(docId, "done");
             return;
           }
@@ -164,23 +254,19 @@ export default function VaultPage() {
           try {
             updateExtractionStatus(docId, "extracting");
 
-            // Get blob from IndexedDB
             const blob = await getFile(docId);
             if (!blob) {
               updateExtractionStatus(docId, "failed");
               return;
             }
 
-            // Extract text client-side
             const text = await extractTextFromBlob(blob, ext);
             if (!text || text.length < 50) {
-              // Not enough text to extract metadata
               updateExtractionStatus(docId, "done");
               await saveMetadata(docId, {}, "done");
               return;
             }
 
-            // Call AI extraction API
             const res = await fetch("/api/vault/extract-metadata", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -194,9 +280,29 @@ export default function VaultPage() {
             if (!res.ok) throw new Error(`API error: ${res.status}`);
             const metadata: ExtractedMetadata = await res.json();
 
-            // Save metadata to IndexedDB
             await saveMetadata(docId, metadata, "done");
             updateExtractionStatus(docId, "done");
+
+            // Handle AI category suggestion
+            if (metadata.suggestedCategory) {
+              const confidence = metadata.categoryConfidence || "medium";
+
+              if (confidence === "high") {
+                // Auto-apply high confidence categories
+                updateCategory(docId, metadata.suggestedCategory);
+              } else {
+                // Show confirmation for medium/low confidence
+                setPendingCategories((prev) => [
+                  ...prev.filter((p) => p.docId !== docId),
+                  {
+                    docId,
+                    suggested: metadata.suggestedCategory!,
+                    alternates: (metadata.alternateCategories || []) as VaultCategory[],
+                    confidence,
+                  },
+                ]);
+              }
+            }
           } catch (err) {
             console.error(`[Vault] Extraction failed for ${doc.name}:`, err);
             updateExtractionStatus(docId, "failed");
@@ -206,11 +312,9 @@ export default function VaultPage() {
     }
 
     isExtractingRef.current = false;
-
-    // After all extractions, re-aggregate company profile
     await refreshProfile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [updateExtractionStatus]);
+  }, [updateExtractionStatus, updateCategory]);
 
   const refreshProfile = async () => {
     try {
@@ -232,7 +336,6 @@ export default function VaultPage() {
       if (fileArray.length === 0) return;
 
       setUploadProgress({ current: 0, total: fileArray.length, fileName: "" });
-
       const newDocs: VaultDocumentMeta[] = [];
 
       for (let i = 0; i < fileArray.length; i++) {
@@ -246,11 +349,11 @@ export default function VaultPage() {
         const id = crypto.randomUUID();
         const ext = file.name.split(".").pop()?.toLowerCase() || "";
 
-        // Auto-detect category from folder structure
+        // For folder uploads, try to detect from folder name
         const detectedCategory = folderUpload ? detectCategory(file) : null;
-        const category = detectedCategory || uploadCategory;
+        // Default to "Other" — AI will re-classify after extraction
+        const category = detectedCategory || "Other";
 
-        // Save blob to IndexedDB
         await saveFile(id, file, "pending");
 
         const meta: VaultDocumentMeta = {
@@ -267,15 +370,12 @@ export default function VaultPage() {
         extractionQueueRef.current.push(id);
       }
 
-      // Add all docs to store at once
       addDocuments(newDocs);
       setUploadProgress(null);
       setShowUpload(false);
-
-      // Start background extraction
       processExtractionQueue();
     },
-    [uploadCategory, addDocuments, processExtractionQueue]
+    [addDocuments, processExtractionQueue]
   );
 
   const handleRetryExtraction = useCallback(
@@ -295,7 +395,6 @@ export default function VaultPage() {
       }
       const url = URL.createObjectURL(blob);
       window.open(url, "_blank");
-      // Cleanup after a delay
       setTimeout(() => URL.revokeObjectURL(url), 30000);
     } catch (err) {
       console.error("Preview failed:", err);
@@ -332,6 +431,8 @@ export default function VaultPage() {
     {} as Record<string, number>
   );
 
+  const pendingCount = pendingCategories.length;
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -339,8 +440,8 @@ export default function VaultPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">Company Vault</h1>
           <p className="text-sm text-slate-400 mt-1">
-            Store and organize your company documents. AI automatically extracts
-            key metadata for bid preparation.
+            Drop your company documents — AI classifies, organizes, and extracts
+            key data automatically.
           </p>
         </div>
         <Button
@@ -348,9 +449,20 @@ export default function VaultPage() {
           className="gap-2 bg-indigo-600 hover:bg-indigo-700"
         >
           <Upload size={16} />
-          Upload Files
+          Upload Documents
         </Button>
       </div>
+
+      {/* Pending categorization banner */}
+      {pendingCount > 0 && (
+        <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg flex items-center gap-3">
+          <Sparkles size={18} className="text-indigo-400 shrink-0" />
+          <p className="text-sm text-indigo-300">
+            <span className="font-medium">{pendingCount} document{pendingCount > 1 ? "s" : ""}</span>{" "}
+            need your confirmation on category placement. Look for the suggestions below.
+          </p>
+        </div>
+      )}
 
       {/* Company Profile Card */}
       {companyProfile && companyProfile.companyName && (
@@ -358,7 +470,9 @@ export default function VaultPage() {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Building2 size={20} className="text-indigo-400" />
-              <h2 className="text-lg font-semibold text-white">Company Profile</h2>
+              <h2 className="text-lg font-semibold text-white">
+                Company Profile
+              </h2>
             </div>
             <Button
               variant="ghost"
@@ -376,41 +490,51 @@ export default function VaultPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Company Name */}
             <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Company Name</p>
-              <p className="text-sm text-white font-medium">{companyProfile.companyName}</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+                Company Name
+              </p>
+              <p className="text-sm text-white font-medium">
+                {companyProfile.companyName}
+              </p>
             </div>
-
-            {/* PAN */}
             {companyProfile.pan && (
               <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">PAN</p>
-                <p className="text-sm text-white font-mono">{companyProfile.pan}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+                  PAN
+                </p>
+                <p className="text-sm text-white font-mono">
+                  {companyProfile.pan}
+                </p>
               </div>
             )}
-
-            {/* GSTIN */}
             {companyProfile.gstin && (
               <div>
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">GSTIN</p>
-                <p className="text-sm text-white font-mono">{companyProfile.gstin}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+                  GSTIN
+                </p>
+                <p className="text-sm text-white font-mono">
+                  {companyProfile.gstin}
+                </p>
               </div>
             )}
-
-            {/* Address */}
             {companyProfile.registeredAddress && (
               <div className="md:col-span-2 lg:col-span-3">
-                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Registered Address</p>
-                <p className="text-sm text-slate-300">{companyProfile.registeredAddress}</p>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">
+                  Registered Address
+                </p>
+                <p className="text-sm text-slate-300">
+                  {companyProfile.registeredAddress}
+                </p>
               </div>
             )}
           </div>
 
-          {/* Partners */}
           {companyProfile.partners.length > 0 && (
             <div className="mt-4">
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Partners / Directors</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">
+                Partners / Directors
+              </p>
               <div className="flex flex-wrap gap-2">
                 {companyProfile.partners.map((p) => (
                   <span
@@ -424,10 +548,11 @@ export default function VaultPage() {
             </div>
           )}
 
-          {/* Turnover */}
           {companyProfile.turnoverHistory.length > 0 && (
             <div className="mt-4">
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Turnover History</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">
+                Turnover History
+              </p>
               <div className="flex flex-wrap gap-3">
                 {companyProfile.turnoverHistory.map((t) => (
                   <div
@@ -442,7 +567,6 @@ export default function VaultPage() {
             </div>
           )}
 
-          {/* Past Projects Summary */}
           {companyProfile.pastProjects.length > 0 && (
             <div className="mt-4">
               <button
@@ -450,7 +574,11 @@ export default function VaultPage() {
                 className="flex items-center gap-2 text-xs text-slate-500 uppercase tracking-wide hover:text-slate-300 transition-colors"
               >
                 Past Projects ({companyProfile.totalProjects})
-                {showProjects ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                {showProjects ? (
+                  <ChevronUp size={14} />
+                ) : (
+                  <ChevronDown size={14} />
+                )}
               </button>
               {showProjects && (
                 <div className="mt-2 space-y-2 max-h-60 overflow-y-auto">
@@ -470,10 +598,11 @@ export default function VaultPage() {
             </div>
           )}
 
-          {/* Certifications */}
           {companyProfile.certifications.length > 0 && (
             <div className="mt-4">
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Certifications</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">
+                Certifications
+              </p>
               <div className="flex flex-wrap gap-2">
                 {companyProfile.certifications.map((c) => (
                   <span
@@ -522,86 +651,113 @@ export default function VaultPage() {
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-slate-500">
           <FolderOpen size={48} className="mx-auto mb-3 opacity-50" />
-          <p className="text-lg font-medium text-slate-400">No documents yet</p>
+          <p className="text-lg font-medium text-slate-400">
+            No documents yet
+          </p>
           <p className="text-sm mt-1">
             {activeCategory === "All"
-              ? "Upload your company documents to get started."
+              ? "Upload your company documents — AI will organize them for you."
               : `No documents in "${activeCategory}".`}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {filtered.map((doc) => (
-            <div
-              key={doc.id}
-              className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 hover:border-slate-600 transition-colors group"
-            >
-              <div className="flex items-start gap-3">
-                <div className="p-2 bg-slate-700/50 rounded-lg shrink-0">
-                  {getFileIcon(doc.name)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p
-                    className="text-sm font-medium text-white truncate"
-                    title={doc.name}
-                  >
-                    {doc.name}
-                  </p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-slate-400">
-                      {getFileExtension(doc.name)}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {formatFileSize(doc.fileSize)}
-                    </span>
-                  </div>
-                  <div className="mt-1.5">
-                    <ExtractionBadge status={doc.extractionStatus} />
-                  </div>
-                </div>
-              </div>
+          {filtered.map((doc) => {
+            const pending = pendingCategories.find(
+              (p) => p.docId === doc.id
+            );
 
-              <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-700/50">
-                <span className="text-xs text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full truncate max-w-[55%]">
-                  {doc.category}
-                </span>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {doc.extractionStatus === "failed" && (
-                    <button
-                      onClick={() => handleRetryExtraction(doc.id)}
-                      className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 rounded-lg transition-colors"
-                      title="Retry extraction"
+            return (
+              <div
+                key={doc.id}
+                className={cn(
+                  "bg-slate-800/50 border rounded-xl p-4 transition-colors group",
+                  pending
+                    ? "border-indigo-500/40"
+                    : "border-slate-700 hover:border-slate-600"
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-slate-700/50 rounded-lg shrink-0">
+                    {getFileIcon(doc.name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p
+                      className="text-sm font-medium text-white truncate"
+                      title={doc.name}
                     >
-                      <RefreshCw size={14} />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handlePreview(doc)}
-                    className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors"
-                    title="Preview / Download"
-                  >
-                    <Eye size={14} />
-                  </button>
-                  <button
-                    onClick={() => removeDocument(doc.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
-                    title="Delete"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                      {doc.name}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs px-1.5 py-0.5 bg-slate-700 rounded text-slate-400">
+                        {getFileExtension(doc.name)}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {formatFileSize(doc.fileSize)}
+                      </span>
+                    </div>
+                    <div className="mt-1.5">
+                      <ExtractionBadge status={doc.extractionStatus} />
+                    </div>
+                  </div>
                 </div>
+
+                <div className="flex items-center justify-between mt-3 pt-3 border-t border-slate-700/50">
+                  <span className="text-xs text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full truncate max-w-[55%]">
+                    {doc.category}
+                  </span>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {doc.extractionStatus === "failed" && (
+                      <button
+                        onClick={() => handleRetryExtraction(doc.id)}
+                        className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 rounded-lg transition-colors"
+                        title="Retry extraction"
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handlePreview(doc)}
+                      className="p-1.5 text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 rounded-lg transition-colors"
+                      title="Preview / Download"
+                    >
+                      <Eye size={14} />
+                    </button>
+                    <button
+                      onClick={() => removeDocument(doc.id)}
+                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                      title="Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* AI Category suggestion */}
+                {pending && (
+                  <CategorySuggestion
+                    docId={doc.id}
+                    suggested={pending.suggested}
+                    alternates={pending.alternates}
+                    confidence={pending.confidence}
+                    onAccept={handleAcceptCategory}
+                    onDismiss={handleDismissCategory}
+                  />
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Upload modal */}
+      {/* Upload modal — no category picker, AI handles it */}
       {showUpload && (
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg p-6">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-white">Upload Documents</h2>
+              <h2 className="text-lg font-semibold text-white">
+                Upload Documents
+              </h2>
               <button
                 onClick={() => setShowUpload(false)}
                 className="p-1 hover:bg-slate-700 rounded-lg text-slate-400"
@@ -610,25 +766,16 @@ export default function VaultPage() {
               </button>
             </div>
 
-            {/* Category selector */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">
-                Category{" "}
-                <span className="text-slate-500 font-normal">
-                  (auto-detected for folder uploads)
-                </span>
-              </label>
-              <select
-                value={uploadCategory}
-                onChange={(e) => setUploadCategory(e.target.value as VaultCategory)}
-                className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                {VAULT_CATEGORIES.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
+            {/* AI clerk info */}
+            <div className="mb-4 p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-lg">
+              <div className="flex items-start gap-2">
+                <Sparkles size={16} className="text-indigo-400 mt-0.5 shrink-0" />
+                <p className="text-sm text-indigo-300">
+                  Just drop your files — AI will read each document, classify
+                  it into the right category, and extract company metadata
+                  automatically.
+                </p>
+              </div>
             </div>
 
             {/* Drop zone */}
@@ -648,7 +795,7 @@ export default function VaultPage() {
             >
               <Upload size={32} className="mx-auto mb-3 text-slate-500" />
               <p className="text-sm text-slate-400 mb-3">
-                Drag & drop files here, or choose an option below
+                Drag & drop files here, or choose below
               </p>
               <div className="flex gap-3 justify-center">
                 <Button
@@ -673,11 +820,12 @@ export default function VaultPage() {
                 </Button>
               </div>
 
-              {/* Upload progress */}
               {uploadProgress && (
                 <div className="mt-4">
                   <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
-                    <span className="truncate max-w-[70%]">{uploadProgress.fileName}</span>
+                    <span className="truncate max-w-[70%]">
+                      {uploadProgress.fileName}
+                    </span>
                     <span>
                       {uploadProgress.current} / {uploadProgress.total}
                     </span>
@@ -695,8 +843,7 @@ export default function VaultPage() {
             </div>
 
             <p className="text-xs text-slate-500 mt-3">
-              Supports PDF, DOC, DOCX, XLS, XLSX, CSV, ZIP, RAR, JPG, PNG. AI
-              metadata extraction runs automatically for PDF files.
+              PDF, DOC, DOCX, XLS, XLSX, CSV, ZIP, RAR, JPG, PNG supported.
             </p>
 
             {/* Hidden file inputs */}
@@ -723,8 +870,8 @@ export default function VaultPage() {
                   const supported = Array.from(e.target.files).filter((f) => {
                     const ext = f.name.split(".").pop()?.toLowerCase() || "";
                     return [
-                      "pdf", "doc", "docx", "xls", "xlsx", "csv",
-                      "zip", "rar", "jpg", "jpeg", "png",
+                      "pdf", "doc", "docx", "xls", "xlsx", "csv", "zip",
+                      "rar", "jpg", "jpeg", "png",
                     ].includes(ext);
                   });
                   handleFiles(supported, true);

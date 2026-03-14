@@ -175,6 +175,9 @@ export interface ExtractedMetadata {
   }[];
   certifications?: string[];
   rawSummary?: string;
+  suggestedCategory?: VaultCategory;
+  categoryConfidence?: "high" | "medium" | "low";
+  alternateCategories?: VaultCategory[];
 }
 
 export interface CompanyProfile {
