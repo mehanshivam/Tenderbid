@@ -55,12 +55,12 @@ function findMatchingForm(
   if (forms.length === 0) return null;
   const searchText = `${item.name} ${item.particular}`.toLowerCase();
 
-  // 1. Try Annexure number match first (most reliable)
-  const annexureMatch = searchText.match(/annexure[-\s]?(\d+)/i);
-  if (annexureMatch) {
-    const num = annexureMatch[1];
+  // 1. Try number-based match first (Annexure-3, Form 2, Schedule-B1, Declaration Letter 1)
+  const formNumMatch = searchText.match(/(?:annexure|form|schedule|declaration(?:\s+letter)?)[-\s]?(\d+)/i);
+  if (formNumMatch) {
+    const num = formNumMatch[1];
     const found = forms.find((f) =>
-      new RegExp(`annexure[-\\s]?0?${num}\\b`, "i").test(f.title)
+      new RegExp(`(?:annexure|form|schedule|declaration)[-\\s]?(?:letter\\s*)?0?${num}\\b`, "i").test(f.title)
     );
     if (found) return found;
   }

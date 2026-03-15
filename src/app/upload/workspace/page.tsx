@@ -114,21 +114,30 @@ export default function UploadWorkspacePage() {
   // Eye icon handler: open annexure tabs or fall back to PDF page
   const handlePreviewItem = useCallback(
     (item: BidChecklistItem) => {
-      // Parse annexure references from name and particular text
-      const searchText = `${item.name} ${item.particular}`;
-      const annexurePattern = /Annexure[-\s]?(\d+)/gi;
-      const matches: string[] = [];
-      let match;
-      while ((match = annexurePattern.exec(searchText)) !== null) {
-        matches.push(match[1]);
+      if (extractedForms.length === 0) {
+        // No forms extracted yet — fall back to PDF page
+        if (item.sourcePages.length > 0) {
+          setActiveTab("preview");
+          setTargetPage({ page: item.sourcePages[0], ts: Date.now() });
+        }
+        return;
       }
 
-      if (matches.length > 0 && extractedForms.length > 0) {
-        // Find matching extracted forms
-        const matchedForms = matches
+      // Try to match checklist item to an extracted form
+      // 1. Direct number match: "Annexure-3", "Form 2", "Schedule-B", "Declaration Letter 1"
+      const searchText = `${item.name} ${item.particular}`;
+      const formPattern = /(?:Annexure|Form|Schedule|Declaration(?:\s+Letter)?)[-\s]?(\d+)/gi;
+      const numberMatches: string[] = [];
+      let m;
+      while ((m = formPattern.exec(searchText)) !== null) {
+        numberMatches.push(m[1]);
+      }
+
+      if (numberMatches.length > 0) {
+        const matchedForms = numberMatches
           .map((num) => {
             return extractedForms.find((f) =>
-              new RegExp(`Annexure[-\\s]?${num}\\b`, "i").test(f.title)
+              new RegExp(`(?:Annexure|Form|Schedule|Declaration)[-\\s]?(?:Letter\\s*)?${num}\\b`, "i").test(f.title)
             );
           })
           .filter((f): f is ExtractedForm => f !== undefined);
@@ -144,6 +153,33 @@ export default function UploadWorkspacePage() {
             return newTabs;
           });
           setActiveTab(matchedForms[0].id);
+          return;
+        }
+      }
+
+      // 2. Fuzzy keyword match — find forms whose title overlaps with item name
+      const itemWords = item.name.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter((w) => w.length > 2);
+      if (itemWords.length > 0) {
+        let bestForm: ExtractedForm | null = null;
+        let bestScore = 0;
+        for (const form of extractedForms) {
+          const titleLower = form.title.toLowerCase();
+          let score = 0;
+          for (const word of itemWords) {
+            if (titleLower.includes(word)) score++;
+          }
+          const ratio = score / itemWords.length;
+          if (ratio > bestScore && ratio >= 0.4) {
+            bestScore = ratio;
+            bestForm = form;
+          }
+        }
+        if (bestForm) {
+          setOpenTabs((prev) => {
+            if (prev.find((t) => t.id === bestForm!.id)) return prev;
+            return [...prev, { id: bestForm!.id, title: bestForm!.title, form: bestForm! }];
+          });
+          setActiveTab(bestForm.id);
           return;
         }
       }
