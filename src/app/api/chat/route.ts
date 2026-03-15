@@ -37,7 +37,7 @@ TENDER DETAILS:
 
 ${tenderContext}
 
-${documentContext ? `DOCUMENT CONTENT:\n${documentContext.slice(0, 30000)}` : "No document text available yet. Ask the user to select and view a PDF document to extract its content."}
+${documentContext ? `DOCUMENT CONTENT:\n${documentContext.slice(0, 30000)}` : "No document text has been extracted yet. The system is still processing the uploaded PDF. Let the user know their document is being analyzed and they can ask questions shortly."}
 
 Help the user understand this tender, its requirements, eligibility criteria, and assist with bid preparation. Be specific and reference details from the tender and documents when available.
 
