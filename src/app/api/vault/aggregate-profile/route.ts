@@ -3,6 +3,7 @@ import { google } from "@ai-sdk/google";
 import { z } from "zod";
 import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
+export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const profileSchema = z.object({
