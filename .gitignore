@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# api usage tracking data
+.api-usage/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

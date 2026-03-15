@@ -1,6 +1,7 @@
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
 export const maxDuration = 60;
 
@@ -95,6 +96,7 @@ const metadataSchema = z.object({
 
 export async function POST(req: Request) {
   const { images, fileName, fileType } = await req.json();
+  const startTime = Date.now();
 
   if (!images || !Array.isArray(images) || images.length === 0) {
     return Response.json(
@@ -103,11 +105,10 @@ export async function POST(req: Request) {
     );
   }
 
+  const imageCount = Math.min(images.length, 10);
+
   try {
-    // Build multimodal content: images + text prompt
-    // Convert base64 strings to Buffers — AI SDK doesn't accept raw base64 or data: URLs
     const imageContents = images.slice(0, 10).map((img: string) => {
-      // Strip data URL prefix if present (e.g. "data:image/jpeg;base64,")
       const raw = img.includes(",") ? img.split(",")[1] : img;
       return {
         type: "image" as const,
@@ -116,17 +117,7 @@ export async function POST(req: Request) {
       };
     });
 
-    const result = await generateObject({
-      model: google("gemini-2.5-flash"),
-      schema: metadataSchema,
-      messages: [
-        {
-          role: "user",
-          content: [
-            ...imageContents,
-            {
-              type: "text",
-              text: `You are an expert at extracting structured company information from Indian business documents used for government tender (B2G) bid preparation.
+    const promptText = `You are an expert at extracting structured company information from Indian business documents used for government tender (B2G) bid preparation.
 
 These are scanned pages from the document "${fileName}" (type: ${fileType}).
 
@@ -147,7 +138,6 @@ EXTRACTION RULES:
    - Extract ALL parties/partners listed in the deed. A partnership deed is a current legal document — everyone listed in it is an active partner.
    - Remove honorifics: Mr., Shri, Smt., Dr., Mrs., Sh., Sri → just the plain name.
    - Ignore "S/o" (Son of), "D/o" (Daughter of) clauses — those reference parents, not partners.
-   - Example: "NARENDRA NATH SINGHAL S/o Late Sri Kailash Nath Singhal ...1st Party" → extract "Narendra Nath Singhal"
 
 6. TURNOVER: Use LACS (never Lucs/Lux). Format: "Rs. 14.62 Lacs" or "Rs. 3.46 Crore"
 
@@ -163,15 +153,66 @@ CATEGORY CLASSIFICATION:
 - "Firm Profile" — Company brochure, capability statement
 - "Rent Agreements" — Rent/lease agreements
 - "Net Worth" — Net worth certificates
-- "Other" — Anything else`,
-            },
+- "Other" — Anything else`;
+
+    const result = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: metadataSchema,
+      messages: [
+        {
+          role: "user",
+          content: [
+            ...imageContents,
+            { type: "text", text: promptText },
           ],
         },
       ],
     });
 
+    const durationMs = Date.now() - startTime;
+    const promptTokens = result.usage?.inputTokens ?? 0;
+    const completionTokens = result.usage?.outputTokens ?? 0;
+    const cost = calculateCost("gemini-2.5-flash", promptTokens, completionTokens, imageCount);
+
+    await trackApiCall({
+      endpoint: "/api/vault/extract-metadata-vision",
+      model: "gemini-2.5-flash",
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      imageCount,
+      estimatedCostUSD: cost.usd,
+      estimatedCostINR: cost.inr,
+      durationMs,
+      status: "success",
+      inputChars: promptText.length,
+      page: "Vault - Document Upload",
+      triggerType: "auto",
+      promptSummary: "Metadata extraction (Vision) — extracts company info + categorizes scanned document",
+      promptText: promptText,
+    });
+
     return Response.json(result.object);
   } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await trackApiCall({
+      endpoint: "/api/vault/extract-metadata-vision",
+      model: "gemini-2.5-flash",
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      imageCount,
+      estimatedCostUSD: 0,
+      estimatedCostINR: 0,
+      durationMs,
+      status: "error",
+      errorMessage: e instanceof Error ? e.message : "Unknown error",
+      inputChars: 0,
+      page: "Vault - Document Upload",
+      triggerType: "auto",
+      promptSummary: "Metadata extraction (Vision) — failed",
+      promptText: "",
+    });
     console.error("Vision metadata extraction failed:", e);
     return Response.json(
       { error: "Failed to extract metadata from images" },

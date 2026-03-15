@@ -15,6 +15,7 @@ import {
   Building2,
   Menu,
   X,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -171,8 +172,21 @@ export function Sidebar() {
         </nav>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-700/50">
-          <p className="text-xs text-slate-500">Tender Discovery Platform</p>
+        <div className="px-3 py-4 border-t border-slate-700/50 space-y-1">
+          <Link
+            href="/admin/api-costs"
+            onClick={() => setMobileOpen(false)}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors",
+              pathname.startsWith("/admin")
+                ? "bg-indigo-500/20 text-indigo-300"
+                : "text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+            )}
+          >
+            <Activity size={14} />
+            API Costs
+          </Link>
+          <p className="text-xs text-slate-600 px-3">Tender Discovery Platform</p>
         </div>
       </aside>
     </>

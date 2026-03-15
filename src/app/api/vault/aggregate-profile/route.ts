@@ -1,6 +1,7 @@
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
 export const maxDuration = 60;
 
@@ -71,6 +72,7 @@ const profileSchema = z.object({
 
 export async function POST(req: Request) {
   const { entries } = await req.json();
+  const startTime = Date.now();
 
   if (!entries || !Array.isArray(entries) || entries.length === 0) {
     return Response.json(
@@ -80,7 +82,6 @@ export async function POST(req: Request) {
   }
 
   try {
-    // Format the raw extracted data for the AI
     const rawData = entries
       .map(
         (
@@ -103,10 +104,7 @@ export async function POST(req: Request) {
       )
       .join("\n\n");
 
-    const result = await generateObject({
-      model: google("gemini-2.5-flash"),
-      schema: profileSchema,
-      prompt: `You are a data cleaning expert for Indian business profiles used in government tender (B2G) bid preparation.
+    const prompt = `You are a data cleaning expert for Indian business profiles used in government tender (B2G) bid preparation.
 
 Below is RAW metadata extracted from ${entries.length} company documents by an AI. Your job is to produce ONE clean, accurate company profile.
 
@@ -176,11 +174,60 @@ CLEANING RULES:
    - Full name with standard number, e.g., "ISO 9001:2015"
    - Deduplicate
 
-Return the cleaned, production-ready company profile.`,
+Return the cleaned, production-ready company profile.`;
+
+    const inputChars = prompt.length;
+
+    const result = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: profileSchema,
+      prompt,
+    });
+
+    const durationMs = Date.now() - startTime;
+    const promptTokens = result.usage?.inputTokens ?? 0;
+    const completionTokens = result.usage?.outputTokens ?? 0;
+    const cost = calculateCost("gemini-2.5-flash", promptTokens, completionTokens);
+
+    await trackApiCall({
+      endpoint: "/api/vault/aggregate-profile",
+      model: "gemini-2.5-flash",
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      imageCount: 0,
+      estimatedCostUSD: cost.usd,
+      estimatedCostINR: cost.inr,
+      durationMs,
+      status: "success",
+      inputChars,
+      page: "Vault - Profile Aggregation",
+      triggerType: "auto",
+      promptSummary: "Profile aggregation — merges all document metadata into one clean company profile",
+      promptText: prompt,
     });
 
     return Response.json(result.object);
   } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await trackApiCall({
+      endpoint: "/api/vault/aggregate-profile",
+      model: "gemini-2.5-flash",
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      imageCount: 0,
+      estimatedCostUSD: 0,
+      estimatedCostINR: 0,
+      durationMs,
+      status: "error",
+      errorMessage: e instanceof Error ? e.message : "Unknown error",
+      inputChars: 0,
+      page: "Vault - Profile Aggregation",
+      triggerType: "auto",
+      promptSummary: "Profile aggregation — failed",
+      promptText: "",
+    });
     console.error("Profile aggregation failed:", e);
     return Response.json(
       { error: "Failed to aggregate profile" },

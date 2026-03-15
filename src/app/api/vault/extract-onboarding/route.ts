@@ -1,8 +1,9 @@
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
-export const maxDuration = 60; // Allow up to 60s for vision extraction (Pro plan: 60s, Hobby: 10s)
+export const maxDuration = 60;
 
 const onboardingSchema = z.object({
   companyName: z
@@ -68,6 +69,7 @@ Extract the trust name, registration number, registered address, and all trustee
 
 export async function POST(req: Request) {
   const { text, images, fileName, fileType, entityType } = await req.json();
+  const startTime = Date.now();
 
   const hasText = text && text.trim().length >= 50;
   const hasImages = images && Array.isArray(images) && images.length > 0;
@@ -81,14 +83,11 @@ export async function POST(req: Request) {
 
   const entityPrompt =
     ENTITY_PROMPTS[entityType] || ENTITY_PROMPTS["Partnership Firm"];
+  const imageCount = hasImages ? Math.min(images.length, 8) : 0;
 
   try {
     if (hasImages) {
-      // Vision-based extraction — preferred when images are available
-      // (scanned PDFs often have garbled text layers that pass the length check)
-      // Convert base64 strings to Buffers — AI SDK doesn't accept raw base64 or data: URLs
       const imageContents = images.slice(0, 8).map((img: string) => {
-        // Strip data URL prefix if present (e.g. "data:image/jpeg;base64,")
         const raw = img.includes(",") ? img.split(",")[1] : img;
         return {
           type: "image" as const,
@@ -97,17 +96,7 @@ export async function POST(req: Request) {
         };
       });
 
-      const result = await generateObject({
-        model: google("gemini-2.5-flash"),
-        schema: onboardingSchema,
-        messages: [
-          {
-            role: "user",
-            content: [
-              ...imageContents,
-              {
-                type: "text",
-                text: `You are an expert at reading Indian business registration documents for government tender bid preparation.
+      const promptText = `You are an expert at reading Indian business registration documents for government tender bid preparation.
 
 This is a scanned document: "${fileName}" (${fileType}) for a ${entityType}.
 
@@ -118,21 +107,49 @@ RULES:
 - Remove all honorifics from names (Mr., Shri, Smt., Dr., Sri, Sh.)
 - PAN format: ABCDE1234F (10 chars). GSTIN format: 15 chars.
 - If a field is not visible, return empty string
-- For address, provide the complete registered address`,
-              },
+- For address, provide the complete registered address`;
+
+      const result = await generateObject({
+        model: google("gemini-2.5-flash"),
+        schema: onboardingSchema,
+        messages: [
+          {
+            role: "user",
+            content: [
+              ...imageContents,
+              { type: "text", text: promptText },
             ],
           },
         ],
       });
 
+      const durationMs = Date.now() - startTime;
+      const promptTokens = result.usage?.inputTokens ?? 0;
+      const completionTokens = result.usage?.outputTokens ?? 0;
+      const cost = calculateCost("gemini-2.5-flash", promptTokens, completionTokens, imageCount);
+
+      await trackApiCall({
+        endpoint: "/api/vault/extract-onboarding",
+        model: "gemini-2.5-flash",
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
+        imageCount,
+        estimatedCostUSD: cost.usd,
+        estimatedCostINR: cost.inr,
+        durationMs,
+        status: "success",
+        inputChars: promptText.length,
+        page: "Vault - Onboarding",
+        triggerType: "auto",
+        promptSummary: "Onboarding extraction (Vision) — extracts company name, PAN, GSTIN, partners from scanned registration doc",
+        promptText: promptText,
+      });
+
       console.log("[Onboarding Vision] Images sent:", imageContents.length, "Result:", JSON.stringify(result.object));
       return Response.json(result.object);
     } else {
-      // Text-based extraction
-      const result = await generateObject({
-        model: google("gemini-2.5-flash"),
-        schema: onboardingSchema,
-        prompt: `You are an expert at reading Indian business registration documents for government tender bid preparation.
+      const promptText = `You are an expert at reading Indian business registration documents for government tender bid preparation.
 
 DOCUMENT: "${fileName}" (${fileType}) for a ${entityType}.
 
@@ -146,12 +163,59 @@ RULES:
 - Remove all honorifics from names (Mr., Shri, Smt., Dr., Sri, Sh.)
 - PAN format: ABCDE1234F (10 chars). GSTIN format: 15 chars.
 - If a field is not found, return empty string
-- For address, provide the complete registered address`,
+- For address, provide the complete registered address`;
+
+      const result = await generateObject({
+        model: google("gemini-2.5-flash"),
+        schema: onboardingSchema,
+        prompt: promptText,
+      });
+
+      const durationMs = Date.now() - startTime;
+      const promptTokens = result.usage?.inputTokens ?? 0;
+      const completionTokens = result.usage?.outputTokens ?? 0;
+      const cost2 = calculateCost("gemini-2.5-flash", promptTokens, completionTokens);
+
+      await trackApiCall({
+        endpoint: "/api/vault/extract-onboarding",
+        model: "gemini-2.5-flash",
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
+        imageCount: 0,
+        estimatedCostUSD: cost2.usd,
+        estimatedCostINR: cost2.inr,
+        durationMs,
+        status: "success",
+        inputChars: promptText.length,
+        page: "Vault - Onboarding",
+        triggerType: "auto",
+        promptSummary: "Onboarding extraction (Text) — extracts company name, PAN, GSTIN, partners from text registration doc",
+        promptText: promptText,
       });
 
       return Response.json(result.object);
     }
   } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await trackApiCall({
+      endpoint: "/api/vault/extract-onboarding",
+      model: "gemini-2.5-flash",
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      imageCount,
+      estimatedCostUSD: 0,
+      estimatedCostINR: 0,
+      durationMs,
+      status: "error",
+      errorMessage: e instanceof Error ? e.message : "Unknown error",
+      inputChars: 0,
+      page: "Vault - Onboarding",
+      triggerType: "auto",
+      promptSummary: "Onboarding extraction — failed",
+      promptText: "",
+    });
     console.error("Onboarding extraction failed:", e);
     return Response.json(
       { error: "Failed to extract data from document" },

@@ -1,6 +1,7 @@
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
 export const maxDuration = 60;
 
@@ -103,6 +104,7 @@ const metadataSchema = z.object({
 
 export async function POST(req: Request) {
   const { text, fileName, fileType } = await req.json();
+  const startTime = Date.now();
 
   if (!text || text.trim().length < 50) {
     return Response.json(
@@ -111,11 +113,7 @@ export async function POST(req: Request) {
     );
   }
 
-  try {
-    const result = await generateObject({
-      model: google("gemini-2.5-flash"),
-      schema: metadataSchema,
-      prompt: `You are an expert at extracting structured company information from Indian business documents used for government tender (B2G) bid preparation.
+  const prompt = `You are an expert at extracting structured company information from Indian business documents used for government tender (B2G) bid preparation.
 
 DOCUMENT: "${fileName}" (type: ${fileType})
 
@@ -163,11 +161,61 @@ Classify this document into one of these categories:
 - "Net Worth" — Net worth certificates, CA-certified net worth statements
 - "Other" — Anything that doesn't clearly fit above
 
-Provide your best category, confidence level, and up to 2 alternatives.`,
+Provide your best category, confidence level, and up to 2 alternatives.`;
+
+  const inputChars = prompt.length;
+
+  try {
+    const result = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: metadataSchema,
+      prompt,
+    });
+
+    const durationMs = Date.now() - startTime;
+    const promptTokens = result.usage?.inputTokens ?? 0;
+    const completionTokens = result.usage?.outputTokens ?? 0;
+    const cost = calculateCost("gemini-2.5-flash", promptTokens, completionTokens);
+
+    await trackApiCall({
+      endpoint: "/api/vault/extract-metadata",
+      model: "gemini-2.5-flash",
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      imageCount: 0,
+      estimatedCostUSD: cost.usd,
+      estimatedCostINR: cost.inr,
+      durationMs,
+      status: "success",
+      inputChars,
+      page: "Vault - Document Upload",
+      triggerType: "auto",
+      promptSummary: "Metadata extraction (Text) — extracts company info + categorizes document from text",
+      promptText: prompt,
     });
 
     return Response.json(result.object);
   } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await trackApiCall({
+      endpoint: "/api/vault/extract-metadata",
+      model: "gemini-2.5-flash",
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      imageCount: 0,
+      estimatedCostUSD: 0,
+      estimatedCostINR: 0,
+      durationMs,
+      status: "error",
+      errorMessage: e instanceof Error ? e.message : "Unknown error",
+      inputChars,
+      page: "Vault - Document Upload",
+      triggerType: "auto",
+      promptSummary: "Metadata extraction (Text) — failed",
+      promptText: prompt,
+    });
     console.error("Vault metadata extraction failed:", e);
     return Response.json(
       { error: "Failed to extract metadata" },

@@ -1,6 +1,7 @@
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
 export const maxDuration = 60;
 
@@ -42,6 +43,7 @@ const checklistSchema = z.object({
 
 export async function POST(req: Request) {
   const { documentContext, companyProfile, vaultDocuments } = await req.json();
+  const startTime = Date.now();
 
   if (!documentContext) {
     return Response.json(
@@ -73,11 +75,7 @@ ${
 COMPANY VAULT: Not set up. Mark all eligibility and document requirements as "unknown" with reasoning "No company vault data available for matching."
 `;
 
-  try {
-    const result = await generateObject({
-      model: google("gemini-2.5-flash"),
-      schema: checklistSchema,
-      prompt: `You are a compliance analyst for Indian government tenders. Analyze the following tender/RFP document and generate a comprehensive compliance checklist.
+  const prompt = `You are a compliance analyst for Indian government tenders. Analyze the following tender/RFP document and generate a comprehensive compliance checklist.
 
 TENDER DOCUMENT:
 ${documentContext.slice(0, 80000)}
@@ -144,7 +142,38 @@ RULES:
 4. Keep reasoning concise but specific — reference actual vault data values when comparing
 5. matchedVaultDocs should contain actual document names from the vault list when applicable
 6. matchedProfileField should name the specific field (e.g. "turnoverHistory", "pastProjects", "pan", "gstin", "certifications", "partners", "yearOfEstablishment")
-`,
+`;
+
+  const inputChars = prompt.length;
+
+  try {
+    const result = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: checklistSchema,
+      prompt,
+    });
+
+    const durationMs = Date.now() - startTime;
+    const promptTokens = result.usage?.inputTokens ?? 0;
+    const completionTokens = result.usage?.outputTokens ?? 0;
+    const cost = calculateCost("gemini-2.5-flash", promptTokens, completionTokens);
+
+    await trackApiCall({
+      endpoint: "/api/generate-checklist",
+      model: "gemini-2.5-flash",
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      imageCount: 0,
+      estimatedCostUSD: cost.usd,
+      estimatedCostINR: cost.inr,
+      durationMs,
+      status: "success",
+      inputChars,
+      page: "Bid Workspace - Checklist",
+      triggerType: "click",
+      promptSummary: "Compliance checklist — analyzes RFP against company vault (eligibility, docs, forms)",
+      promptText: prompt,
     });
 
     const allItems = result.object.sections.flatMap((s) => s.items);
@@ -158,6 +187,25 @@ RULES:
 
     return Response.json({ ...result.object, summary });
   } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await trackApiCall({
+      endpoint: "/api/generate-checklist",
+      model: "gemini-2.5-flash",
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      imageCount: 0,
+      estimatedCostUSD: 0,
+      estimatedCostINR: 0,
+      durationMs,
+      status: "error",
+      errorMessage: e instanceof Error ? e.message : "Unknown error",
+      inputChars,
+      page: "Bid Workspace - Checklist",
+      triggerType: "click",
+      promptSummary: "Compliance checklist — failed",
+      promptText: prompt,
+    });
     console.error("Checklist generation failed:", e);
     return Response.json(
       { error: "Failed to generate compliance checklist" },

@@ -1,6 +1,7 @@
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
 const formTagEnum = z.enum([
   "Needs Notarization",
@@ -35,6 +36,7 @@ const formSchema = z.object({
 
 export async function POST(req: Request) {
   const { documentContext } = await req.json();
+  const startTime = Date.now();
 
   if (!documentContext) {
     return Response.json(
@@ -43,11 +45,7 @@ export async function POST(req: Request) {
     );
   }
 
-  try {
-    const result = await generateObject({
-      model: google("gemini-2.5-flash"),
-      schema: formSchema,
-      prompt: `You are a tender document analyst. Analyze the following tender/RFP document and extract EVERY annexure, form, declaration, affidavit, undertaking, certificate format, and bid format that a bidder must fill out and submit.
+  const prompt = `You are a tender document analyst. Analyze the following tender/RFP document and extract EVERY annexure, form, declaration, affidavit, undertaking, certificate format, and bid format that a bidder must fill out and submit.
 
 DOCUMENT CONTENT:
 ${documentContext.slice(0, 80000)}
@@ -91,11 +89,61 @@ CRITICAL INSTRUCTIONS:
 
 6. DO NOT extract the tender notice itself, instructions, or eligibility criteria — only extract fillable forms/annexures.
 
-Return ALL forms found. If there are no forms, return an empty array.`,
+Return ALL forms found. If there are no forms, return an empty array.`;
+
+  const inputChars = prompt.length;
+
+  try {
+    const result = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: formSchema,
+      prompt,
+    });
+
+    const durationMs = Date.now() - startTime;
+    const promptTokens = result.usage?.inputTokens ?? 0;
+    const completionTokens = result.usage?.outputTokens ?? 0;
+    const cost = calculateCost("gemini-2.5-flash", promptTokens, completionTokens);
+
+    await trackApiCall({
+      endpoint: "/api/extract-forms",
+      model: "gemini-2.5-flash",
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      imageCount: 0,
+      estimatedCostUSD: cost.usd,
+      estimatedCostINR: cost.inr,
+      durationMs,
+      status: "success",
+      inputChars,
+      page: "Bid Workspace - Forms",
+      triggerType: "click",
+      promptSummary: "Form extraction — extracts all annexures/forms/declarations as HTML from RFP",
+      promptText: prompt,
     });
 
     return Response.json(result.object);
   } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await trackApiCall({
+      endpoint: "/api/extract-forms",
+      model: "gemini-2.5-flash",
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      imageCount: 0,
+      estimatedCostUSD: 0,
+      estimatedCostINR: 0,
+      durationMs,
+      status: "error",
+      errorMessage: e instanceof Error ? e.message : "Unknown error",
+      inputChars,
+      page: "Bid Workspace - Forms",
+      triggerType: "click",
+      promptSummary: "Form extraction — failed",
+      promptText: prompt,
+    });
     console.error("Form extraction failed:", e);
     return Response.json(
       { error: "Failed to extract forms from document" },

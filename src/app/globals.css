@@ -127,3 +127,8 @@
     @apply font-sans;
   }
 }
+
+@keyframes scan {
+  0%, 100% { top: 8px; }
+  50% { top: calc(100% - 8px); }
+}

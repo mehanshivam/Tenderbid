@@ -93,31 +93,51 @@ export function ChatInterface({ tenderId, documentContext, onCitationClick }: Ch
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-3 relative">
+        {/* Full overlay while document is being extracted — blocks all interaction */}
+        {!documentContext && (
+          <div className="absolute inset-0 z-10 bg-white flex items-center justify-center">
+            <div className="text-center space-y-4">
+              {/* Animated document scanning visual */}
+              <div className="relative mx-auto w-16 h-20 bg-white rounded-lg shadow-md border border-gray-200 overflow-hidden">
+                <div className="absolute inset-x-0 h-0.5 bg-indigo-500 animate-[scan_2s_ease-in-out_infinite]" />
+                <div className="px-2 pt-3 space-y-1.5">
+                  <div className="h-1 bg-gray-200 rounded w-full" />
+                  <div className="h-1 bg-gray-200 rounded w-3/4" />
+                  <div className="h-1 bg-gray-200 rounded w-full" />
+                  <div className="h-1 bg-gray-200 rounded w-1/2" />
+                  <div className="h-1 bg-gray-200 rounded w-5/6" />
+                  <div className="h-1 bg-gray-200 rounded w-2/3" />
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-indigo-600">Reading your document...</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Extracting text from all pages
+                </p>
+              </div>
+              {/* Pulsing dots */}
+              <div className="flex justify-center gap-1">
+                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce" />
+                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:150ms]" />
+                <span className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce [animation-delay:300ms]" />
+              </div>
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-50 border border-red-200 rounded p-2 text-xs text-red-700">
             Error: {error.message}
           </div>
         )}
-        {messages.length === 0 && !error && (
-          <div className="text-center py-8 text-gray-400">
-            {!documentContext ? (
-              <>
-                <Loader2 size={32} className="mx-auto mb-2 opacity-50 animate-spin text-indigo-400" />
-                <p className="text-sm text-indigo-500">Extracting document text…</p>
-                <p className="text-xs mt-1">
-                  Please wait while I read the document
-                </p>
-              </>
-            ) : (
-              <>
-                <Bot size={32} className="mx-auto mb-2 opacity-50" />
-                <p className="text-sm">Ask about this tender</p>
-                <p className="text-xs mt-1">
-                  I can help with eligibility, requirements, bid preparation
-                </p>
-              </>
-            )}
+        {messages.length === 0 && !error && documentContext && (
+          <div className="text-center py-8">
+            <Bot size={32} className="mx-auto mb-2 opacity-50 text-gray-400" />
+            <p className="text-sm text-gray-500">Ask about this tender</p>
+            <p className="text-xs text-gray-400 mt-1">
+              I can help with eligibility, requirements, bid preparation
+            </p>
           </div>
         )}
 

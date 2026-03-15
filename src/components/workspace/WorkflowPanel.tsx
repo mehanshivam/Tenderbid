@@ -10,6 +10,7 @@ import {
   Check,
   Lock,
   Upload,
+  Download,
   FileText,
   FolderOpen,
   Package,
@@ -18,13 +19,86 @@ import {
 } from "lucide-react";
 import { useVaultStore } from "@/store/vaultStore";
 import { saveFile } from "@/lib/vaultDB";
-import type { BidChecklistItem, FormTag } from "@/lib/types";
+import type { BidChecklistItem, ExtractedForm, FormTag } from "@/lib/types";
 
 interface WorkflowPanelProps {
   tenderName: string;
   fileCount: number;
   documentText: string;
+  extractedForms: ExtractedForm[];
+  isExtracting: boolean;
   onPreviewItem: (item: BidChecklistItem) => void;
+  onOpenForm: (form: ExtractedForm) => void;
+}
+
+// ─── Fuzzy matching: checklist item → extracted form ───
+const STOP_WORDS = new Set([
+  "the", "for", "and", "from", "with", "that", "this", "has", "have",
+  "been", "not", "are", "was", "were", "will", "can", "may", "shall",
+  "needs", "need",
+]);
+
+/** Basic stemming: remove trailing s/es/ed/ing for comparison */
+function stem(word: string): string {
+  return word
+    .replace(/ations$/, "ation")
+    .replace(/ments$/, "ment")
+    .replace(/ies$/, "y")
+    .replace(/es$/, "e")
+    .replace(/s$/, "");
+}
+
+function findMatchingForm(
+  item: BidChecklistItem,
+  forms: ExtractedForm[]
+): ExtractedForm | null {
+  if (forms.length === 0) return null;
+  const searchText = `${item.name} ${item.particular}`.toLowerCase();
+
+  // 1. Try Annexure number match first (most reliable)
+  const annexureMatch = searchText.match(/annexure[-\s]?(\d+)/i);
+  if (annexureMatch) {
+    const num = annexureMatch[1];
+    const found = forms.find((f) =>
+      new RegExp(`annexure[-\\s]?0?${num}\\b`, "i").test(f.title)
+    );
+    if (found) return found;
+  }
+
+  // 2. Fuzzy keyword match using stemmed words
+  const itemWords = item.name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+
+  if (itemWords.length === 0) return null;
+
+  const itemStems = itemWords.map(stem);
+
+  let bestMatch: ExtractedForm | null = null;
+  let bestScore = 0;
+
+  for (const form of forms) {
+    const formTitle = form.title.toLowerCase();
+    const formStems = formTitle
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .map(stem);
+    const formStemStr = formStems.join(" ");
+
+    let score = 0;
+    for (const s of itemStems) {
+      if (formStemStr.includes(s)) score++;
+    }
+    const ratio = score / itemStems.length;
+    if (ratio > bestScore && ratio >= 0.35) {
+      bestScore = ratio;
+      bestMatch = form;
+    }
+  }
+
+  return bestMatch;
 }
 
 const TAG_STYLES: Record<string, { bg: string; text: string }> = {
@@ -49,7 +123,10 @@ export function WorkflowPanel({
   tenderName,
   fileCount,
   documentText,
+  extractedForms,
+  isExtracting,
   onPreviewItem,
+  onOpenForm,
 }: WorkflowPanelProps) {
   const [items, setItems] = useState<BidChecklistItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -159,6 +236,30 @@ export function WorkflowPanel({
           : item
       )
     );
+  }, []);
+
+  const handleDownloadForm = useCallback(async (form: ExtractedForm) => {
+    try {
+      const res = await fetch("/api/export-docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          html: form.contentHtml,
+          filename: form.title,
+          tags: form.tags,
+        }),
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${form.title.replace(/[^a-zA-Z0-9_-]/g, "_")}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("DOCX download failed:", e);
+    }
   }, []);
 
   const documentItems = items.filter((i) => i.type === "document");
@@ -356,18 +457,43 @@ export function WorkflowPanel({
                     <span className="text-[10px] text-gray-300">
                       ({annexureItems.length})
                     </span>
+                    {isExtracting && (
+                      <span className="flex items-center gap-1 text-[9px] text-indigo-500 ml-auto animate-pulse">
+                        <Loader2 size={9} className="animate-spin" />
+                        Extracting forms...
+                      </span>
+                    )}
+                    {!isExtracting && extractedForms.length > 0 && (
+                      <span className="text-[9px] text-emerald-500 ml-auto font-medium">
+                        {extractedForms.length} forms ready
+                      </span>
+                    )}
                   </div>
-                  {annexureItems.map((item) => (
-                    <ChecklistItemRow
-                      key={item.id}
-                      item={item}
-                      onPreview={() => onPreviewItem(item)}
-                      onApprove={() => handleApprove(item.id)}
-                      onFileUpload={(file) => handleFileUpload(item.id, file)}
-                      onRemoveFile={() => handleRemoveFile(item.id)}
-                      isAnnexure
-                    />
-                  ))}
+                  {annexureItems.map((item) => {
+                    const matchedForm = findMatchingForm(item, extractedForms);
+                    return (
+                      <ChecklistItemRow
+                        key={item.id}
+                        item={item}
+                        onPreview={() =>
+                          matchedForm
+                            ? onOpenForm(matchedForm)
+                            : onPreviewItem(item)
+                        }
+                        onApprove={() => handleApprove(item.id)}
+                        onFileUpload={(file) => handleFileUpload(item.id, file)}
+                        onRemoveFile={() => handleRemoveFile(item.id)}
+                        isAnnexure
+                        matchedForm={matchedForm}
+                        isFormExtracting={isExtracting}
+                        onDownloadForm={
+                          matchedForm
+                            ? () => handleDownloadForm(matchedForm)
+                            : undefined
+                        }
+                      />
+                    );
+                  })}
                 </div>
               )}
 
@@ -416,6 +542,9 @@ function ChecklistItemRow({
   onFileUpload,
   onRemoveFile,
   isAnnexure,
+  matchedForm,
+  isFormExtracting,
+  onDownloadForm,
 }: {
   item: BidChecklistItem;
   onPreview: () => void;
@@ -423,6 +552,9 @@ function ChecklistItemRow({
   onFileUpload: (file: File) => void;
   onRemoveFile: () => void;
   isAnnexure?: boolean;
+  matchedForm?: ExtractedForm | null;
+  isFormExtracting?: boolean;
+  onDownloadForm?: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isApproved = item.status === "approved";
@@ -534,11 +666,39 @@ function ChecklistItemRow({
             <Upload size={13} />
           </button>
 
-          {/* Preview button */}
+          {/* Download DOCX — only for annexures with matched forms */}
+          {isAnnexure && matchedForm && onDownloadForm && (
+            <button
+              onClick={onDownloadForm}
+              className="p-1 rounded hover:bg-emerald-50 text-emerald-500 hover:text-emerald-700 transition-colors"
+              title="Download as DOCX"
+            >
+              <Download size={13} />
+            </button>
+          )}
+
+          {/* Extracting spinner — annexure without match yet */}
+          {isAnnexure && !matchedForm && isFormExtracting && (
+            <span className="p-1" title="Extracting form content...">
+              <Loader2 size={12} className="animate-spin text-indigo-400" />
+            </span>
+          )}
+
+          {/* Preview / Open form button */}
           <button
             onClick={onPreview}
-            className="p-1 rounded hover:bg-indigo-50 text-gray-400 hover:text-indigo-600 transition-colors"
-            title="Preview in document"
+            className={`p-1 rounded transition-colors ${
+              isAnnexure && matchedForm
+                ? "hover:bg-indigo-50 text-indigo-500 hover:text-indigo-700"
+                : "hover:bg-indigo-50 text-gray-400 hover:text-indigo-600"
+            }`}
+            title={
+              isAnnexure && matchedForm
+                ? "Open form editor"
+                : isAnnexure && isFormExtracting
+                  ? "Form being extracted..."
+                  : "Preview in document"
+            }
           >
             <Eye size={13} />
           </button>

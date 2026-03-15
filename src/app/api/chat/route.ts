@@ -1,10 +1,12 @@
 import { streamText, type UIMessage, convertToModelMessages } from "ai";
 import { google } from "@ai-sdk/google";
+import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
 const BACKEND_URL = process.env.BACKEND_URL || "http://156.67.104.82";
 
 export async function POST(req: Request) {
   const { messages: rawMessages, tenderId, documentContext } = await req.json();
+  const startTime = Date.now();
 
   // Fetch tender details for context
   let tenderContext = "";
@@ -51,11 +53,36 @@ IMPORTANT CITATION RULES:
 Format your responses in clear markdown.`;
 
   const coreMessages = await convertToModelMessages(rawMessages as UIMessage[]);
+  const inputChars = systemPrompt.length + JSON.stringify(coreMessages).length;
 
   const result = streamText({
     model: google("gemini-2.5-flash"),
     system: systemPrompt,
     messages: coreMessages,
+    onFinish: async ({ usage }) => {
+      const durationMs = Date.now() - startTime;
+      const promptTokens = usage?.inputTokens ?? 0;
+      const completionTokens = usage?.outputTokens ?? 0;
+      const cost = calculateCost("gemini-2.5-flash", promptTokens, completionTokens);
+
+      await trackApiCall({
+        endpoint: "/api/chat",
+        model: "gemini-2.5-flash",
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
+        imageCount: 0,
+        estimatedCostUSD: cost.usd,
+        estimatedCostINR: cost.inr,
+        durationMs,
+        status: "success",
+        inputChars,
+        page: "Bid Workspace - Chat",
+        triggerType: "click",
+        promptSummary: "Tender analysis chat — system prompt with tender details + document context + user messages",
+        promptText: systemPrompt,
+      });
+    },
   });
 
   return result.toUIMessageStreamResponse();
