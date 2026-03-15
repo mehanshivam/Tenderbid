@@ -44,7 +44,7 @@ const bidChecklistSchema = z.object({
           "Special requirements for this item. Detect from the document text: stamp paper, notarization, company letterhead, company seal, affidavit, witness signature, court fee stamp, board resolution."
         ),
     })
-  ),
+  ).min(10).max(25).describe("Between 10 and 25 checklist items. Merge related documents to stay under 25."),
 });
 
 export async function POST(req: Request) {
@@ -104,7 +104,7 @@ CRITICAL RULES:
 
 7. **SOURCE PAGES**: Use [Page X] markers from the document to populate sourcePages accurately.
 
-8. Target 10-20 items total. Group related DOCUMENTS together but keep each ANNEXURE separate.
+8. **ITEM COUNT — STRICT LIMIT**: You MUST produce between 15 and 25 items total. NO MORE than 25. Group related documents aggressively — combine similar certificates (e.g. "Registration & Trade License", "Tax Compliance Documents"). Each annexure stays separate, but documents MUST be consolidated. If you have more than 25 items, merge document categories until you are under 25.
 
 EXAMPLE OUTPUT:
 - name: "Bid Processing Fees & EMD", type: "document", particular: "Demand Draft for bid fee Rs. 2000+300+GST, DD for EMD Rs. 46 Lakhs, in favour of Secretary BSGUP", tags: []
