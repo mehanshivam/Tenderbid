@@ -3,65 +3,26 @@
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { ChatInterface } from "@/components/workspace/ChatInterface";
-import { PreviewPanel } from "@/components/workspace/PreviewPanel";
+import { WorkflowPanel } from "@/components/workspace/WorkflowPanel";
 import { useUploadStore } from "@/stores/uploadStore";
-import { formatFileSize } from "@/lib/format";
-import {
-  ArrowLeft,
-  FileText,
-  FileArchive,
-  FileSpreadsheet,
-  Upload,
-} from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import type { UploadedFile, TenderDocument } from "@/lib/types";
+import { Group, Panel, Separator } from "react-resizable-panels";
+import type { UploadedFile } from "@/lib/types";
 
-function getFileIcon(fileType: string) {
-  switch (fileType.toLowerCase()) {
-    case "pdf":
-      return FileText;
-    case "zip":
-    case "rar":
-      return FileArchive;
-    case "xls":
-    case "xlsx":
-    case "csv":
-      return FileSpreadsheet;
-    default:
-      return FileText;
+const PdfViewer = dynamic(
+  () => import("@/components/workspace/PdfViewer").then((mod) => ({ default: mod.PdfViewer })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center h-full">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600" />
+      </div>
+    ),
   }
-}
-
-function getFileColor(fileType: string) {
-  switch (fileType.toLowerCase()) {
-    case "pdf":
-      return "text-red-500";
-    case "zip":
-    case "rar":
-      return "text-yellow-600";
-    case "xls":
-    case "xlsx":
-      return "text-green-600";
-    default:
-      return "text-gray-500";
-  }
-}
-
-// Map UploadedFile to TenderDocument shape for PreviewPanel compatibility
-function toTenderDoc(file: UploadedFile): TenderDocument {
-  return {
-    id: 0,
-    tender_id: "upload",
-    portal_id: "upload",
-    filename: file.name,
-    file_size: file.size,
-    file_type: file.type,
-    checksum: null,
-    downloaded_at: new Date().toISOString(),
-  };
-}
+);
 
 export default function UploadWorkspacePage() {
   const router = useRouter();
@@ -74,12 +35,15 @@ export default function UploadWorkspacePage() {
     ts: number;
   } | null>(null);
 
-  // Redirect if no files uploaded
+  // Redirect if no files uploaded, auto-select first PDF
   useEffect(() => {
     if (files.length === 0) {
       router.replace("/upload");
+    } else if (!selectedFile) {
+      const pdf = files.find((f) => f.type.toLowerCase() === "pdf");
+      setSelectedFile(pdf || files[0]);
     }
-  }, [files, router]);
+  }, [files, router, selectedFile]);
 
   const handleTextExtracted = useCallback((text: string) => {
     setDocumentText(text);
@@ -89,116 +53,77 @@ export default function UploadWorkspacePage() {
     setTargetPage({ page, ts: Date.now() });
   }, []);
 
+  const handlePreviewPages = useCallback((pages: number[]) => {
+    if (pages.length > 0) {
+      setTargetPage({ page: pages[0], ts: Date.now() });
+    }
+  }, []);
+
   if (files.length === 0) return null;
 
   return (
-    <div className="h-screen flex flex-col">
-      {/* Header */}
-      <div className="shrink-0 bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center gap-3 mb-2">
-          <Link href="/upload">
-            <Button variant="ghost" size="sm">
-              <ArrowLeft size={16} className="mr-1" />
-              Back
-            </Button>
-          </Link>
-        </div>
-        <div>
-          <h1 className="text-lg font-bold text-gray-900 line-clamp-1">
-            {tenderName}
-          </h1>
-          <div className="flex items-center gap-3 mt-1 text-sm text-gray-500">
-            <span className="flex items-center gap-1">
-              <Upload size={14} />
-              Uploaded
-            </span>
-            <span className="flex items-center gap-1">
-              <FileText size={14} />
-              {files.length} Document{files.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-        </div>
+    <div className="h-screen flex flex-col bg-gray-50">
+      {/* Compact Header */}
+      <div className="shrink-0 bg-white border-b border-gray-200 px-3 py-1.5 flex items-center gap-2">
+        <Link href="/upload">
+          <Button variant="ghost" size="sm" className="h-6 px-1.5 text-xs">
+            <ArrowLeft size={12} className="mr-0.5" />
+            Back
+          </Button>
+        </Link>
+        <div className="w-px h-4 bg-gray-200" />
+        <span className="text-xs font-medium text-gray-600 truncate">
+          {tenderName}
+        </span>
       </div>
 
-      {/* Workspace */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel */}
-        <div className="w-[380px] shrink-0 flex flex-col bg-white border-r border-gray-200">
-          {/* Document list */}
-          <div className="shrink-0 max-h-[45%] overflow-y-auto border-b border-gray-100">
-            <div className="p-3">
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 px-1">
-                Documents ({files.length})
-              </h3>
-              <div className="space-y-1">
-                {files.map((file) => {
-                  const Icon = getFileIcon(file.type);
-                  const colorClass = getFileColor(file.type);
-                  const isSelected = selectedFile?.id === file.id;
-
-                  return (
-                    <div
-                      key={file.id}
-                      className={cn(
-                        "flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-colors",
-                        isSelected
-                          ? "bg-indigo-50 border border-indigo-200"
-                          : "hover:bg-gray-50 border border-transparent"
-                      )}
-                      onClick={() => setSelectedFile(file)}
-                    >
-                      <Icon size={18} className={colorClass} />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 truncate">
-                          {file.name}
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          {file.type.toUpperCase()} &middot;{" "}
-                          {formatFileSize(file.size)}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+      {/* 3-Panel Workspace */}
+      <div className="flex-1 min-h-0">
+        <Group orientation="horizontal" className="flex h-full w-full">
+          {/* Left: Workflow Panel */}
+          <Panel id="workflow" defaultSize="30%" minSize="22%" maxSize="40%">
+            <div className="h-full overflow-hidden">
+              <WorkflowPanel
+                tenderName={tenderName}
+                fileCount={files.length}
+                documentText={documentText}
+                onPreviewPages={handlePreviewPages}
+              />
             </div>
-          </div>
+          </Panel>
 
-          {/* Chat */}
-          <div className="flex-1 min-h-0 flex flex-col">
-            <ChatInterface
-              tenderId="upload"
-              documentContext={documentText}
-              onCitationClick={handleCitationClick}
-            />
-          </div>
-        </div>
+          <Separator className="w-px bg-gray-200" />
 
-        {/* Right Panel */}
-        <div className="flex-1 bg-white">
-          {selectedFile ? (
-            <PreviewPanel
-              document={toTenderDoc(selectedFile)}
-              onTextExtracted={handleTextExtracted}
-              targetPage={targetPage}
-              documentText={documentText}
-              onCitationClick={handleCitationClick}
-              pdfUrl={selectedFile.blobUrl}
-            />
-          ) : (
-            <div className="flex items-center justify-center h-full text-gray-400">
-              <div className="text-center">
-                <FileText size={48} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm font-medium">
-                  Select a document to preview
-                </p>
-                <p className="text-xs mt-1">
-                  Click on a document from the left panel
-                </p>
-              </div>
+          {/* Center: Document Viewer */}
+          <Panel id="viewer" defaultSize="45%" minSize="30%">
+            <div className="h-full overflow-hidden bg-white">
+              {selectedFile ? (
+                <PdfViewer
+                  url={selectedFile.blobUrl}
+                  onTextExtracted={handleTextExtracted}
+                  targetPage={targetPage}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-400">
+                  <p className="text-sm">No document to preview</p>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </Panel>
+
+          <Separator className="w-px bg-gray-200" />
+
+          {/* Right: AI Chat */}
+          <Panel id="chat" defaultSize="25%" minSize="18%" maxSize="35%">
+            <div className="h-full overflow-hidden bg-white border-l border-gray-200">
+              <ChatInterface
+                tenderId="upload"
+                documentContext={documentText}
+                onCitationClick={handleCitationClick}
+              />
+            </div>
+          </Panel>
+        </Group>
       </div>
     </div>
   );

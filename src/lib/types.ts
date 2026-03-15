@@ -138,12 +138,23 @@ export const VAULT_CATEGORIES = [
 
 export type VaultCategory = (typeof VAULT_CATEGORIES)[number];
 
+export type FormTag =
+  | "Needs Notarization"
+  | "Needs Stamp Paper"
+  | "Needs Company Seal"
+  | "Needs Attestation"
+  | "Needs Affidavit"
+  | "Needs Witness Signature"
+  | "Needs Court Fee Stamp"
+  | "Needs Board Resolution";
+
 export interface ExtractedForm {
   id: string;
   title: string;
   type: "form" | "annexure" | "schedule" | "declaration" | "other";
   sourcePages: number[];
   contentHtml: string;
+  tags: FormTag[];
 }
 
 // ─── Vault v2 Types (IndexedDB-backed) ───
@@ -158,6 +169,7 @@ export interface VaultDocumentMeta {
   fileSize: number;
   uploadedAt: string;
   extractionStatus: ExtractionStatus;
+  isOnboardingDoc?: boolean;
 }
 
 export interface ExtractedMetadata {
@@ -180,8 +192,22 @@ export interface ExtractedMetadata {
   alternateCategories?: VaultCategory[];
 }
 
+export type EntityType =
+  | "Partnership Firm"
+  | "Private Limited"
+  | "Public Limited"
+  | "LLP"
+  | "Proprietorship"
+  | "Society"
+  | "Trust"
+  | "Other";
+
 export interface CompanyProfile {
+  entityType?: EntityType;
   companyName: string;
+  yearOfEstablishment?: number;
+  businessDomain?: string[];
+  stateCity?: string;
   pan: string;
   gstin: string;
   registeredAddress: string;
@@ -195,7 +221,72 @@ export interface CompanyProfile {
     year: string;
   }[];
   certifications: string[];
+  registrations?: string[];
   lastUpdated: string;
+  onboardingDocId?: string;
+}
+
+/** Business domains for "similar work" matching in RFP eligibility */
+export const BUSINESS_DOMAINS = [
+  "Event Management & Tent Services",
+  "Civil Construction",
+  "Road & Highway Construction",
+  "Building Construction",
+  "Electrical Works",
+  "Plumbing & Sanitary",
+  "IT Services & Software",
+  "Consulting Services",
+  "Supply & Trading",
+  "Catering & Hospitality",
+  "Security Services",
+  "Cleaning & Housekeeping",
+  "Transport & Logistics",
+  "Printing & Stationery",
+  "Medical & Healthcare",
+  "Agriculture & Farming",
+  "Education & Training",
+  "Other",
+] as const;
+
+export type BusinessDomain = (typeof BUSINESS_DOMAINS)[number];
+
+// ─── Compliance Checklist Types ───
+
+export type ChecklistStatus = "met" | "not_met" | "partial" | "unknown";
+
+export interface ChecklistItem {
+  requirement: string;
+  status: ChecklistStatus;
+  reasoning: string;
+  sourcePages: number[];
+  matchedVaultDocs?: string[];
+  matchedProfileField?: string;
+}
+
+export interface ChecklistSection {
+  title: string;
+  items: ChecklistItem[];
+}
+
+export interface ComplianceChecklist {
+  sections: ChecklistSection[];
+  summary: {
+    total: number;
+    met: number;
+    notMet: number;
+    partial: number;
+    unknown: number;
+  };
+}
+
+// ─── Bid Checklist Types (Workspace Workflow) ───
+
+export interface BidChecklistItem {
+  id: number;
+  name: string;
+  particular: string;
+  sourcePages: number[];
+  status: "pending" | "approved";
 }
 
 /** Maps common folder names to vault categories for auto-categorization */

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { formatFileSize } from "@/lib/format";
 import { getDocumentDownloadUrl } from "@/lib/api";
 import { FormsPanel } from "./FormsPanel";
+import { ChecklistPanel } from "./ChecklistPanel";
 import type { TenderDocument } from "@/lib/types";
 
 const PdfViewer = dynamic(
@@ -40,7 +41,7 @@ export function PreviewPanel({
   onCitationClick,
   pdfUrl,
 }: PreviewPanelProps) {
-  const [activeTab, setActiveTab] = useState<"preview" | "forms">("preview");
+  const [activeTab, setActiveTab] = useState<"preview" | "forms" | "checklist">("preview");
 
   if (!document) {
     return (
@@ -96,7 +97,7 @@ export function PreviewPanel({
       <div className="shrink-0 flex border-b border-gray-200 bg-white">
         <button
           onClick={() => setActiveTab("preview")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
             activeTab === "preview"
               ? "border-indigo-600 text-indigo-600"
               : "border-transparent text-gray-500 hover:text-gray-700"
@@ -106,13 +107,23 @@ export function PreviewPanel({
         </button>
         <button
           onClick={() => setActiveTab("forms")}
-          className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+          className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
             activeTab === "forms"
               ? "border-indigo-600 text-indigo-600"
               : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
           Forms & Annexures
+        </button>
+        <button
+          onClick={() => setActiveTab("checklist")}
+          className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+            activeTab === "checklist"
+              ? "border-indigo-600 text-indigo-600"
+              : "border-transparent text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Compliance Checklist
         </button>
       </div>
 
@@ -128,6 +139,12 @@ export function PreviewPanel({
         </div>
         <div className={`h-full ${activeTab !== "forms" ? "hidden" : ""}`}>
           <FormsPanel
+            documentText={documentText || ""}
+            onCitationClick={onCitationClick}
+          />
+        </div>
+        <div className={`h-full ${activeTab !== "checklist" ? "hidden" : ""}`}>
+          <ChecklistPanel
             documentText={documentText || ""}
             onCitationClick={onCitationClick}
           />
