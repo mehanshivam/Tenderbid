@@ -19,6 +19,7 @@ import {
   ArrowRight,
   FolderOpen,
   CreditCard,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useVaultStore } from "@/store/vaultStore";
@@ -97,7 +98,7 @@ const INDIAN_STATES = [
 // ─── Step Indicator ───
 
 function StepIndicator({ current, total }: { current: number; total: number }) {
-  const labels = ["Incorporation", "Review", "PAN Card", "Registration & Finance", "Experience"];
+  const labels = ["Incorporation", "Review", "PAN Card", "GST", "Reg & Finance", "Experience"];
   return (
     <div className="flex items-center gap-1 mb-8">
       {Array.from({ length: total }).map((_, i) => (
@@ -160,7 +161,6 @@ export default function OnboardingWizard() {
 
   // Step 1 state — review extracted data
   const [extractedName, setExtractedName] = useState("");
-  const [extractedGstin, setExtractedGstin] = useState("");
   const [extractedAddress, setExtractedAddress] = useState("");
   const [extractedPartners, setExtractedPartners] = useState<string[]>([]);
   const [newPartner, setNewPartner] = useState("");
@@ -179,13 +179,28 @@ export default function OnboardingWizard() {
   const [panExtracting, setPanExtracting] = useState(false);
   const [panError, setPanError] = useState("");
   const [panExtracted, setPanExtracted] = useState(false);
+  const [panPreview, setPanPreview] = useState<string | null>(null);
 
-  // Step 3/4 state — bulk uploads
+  // Step 3 state — GST certificate
+  const [gstFile, setGstFile] = useState<{
+    id: string;
+    name: string;
+    blob: Blob;
+    fileType: string;
+  } | null>(null);
+  const [extractedGstin, setExtractedGstin] = useState("");
+  const [gstExtracting, setGstExtracting] = useState(false);
+  const [gstError, setGstError] = useState("");
+  const [gstExtracted, setGstExtracted] = useState(false);
+  const [gstPreview, setGstPreview] = useState<string | null>(null);
+
+  // Step 4/5 state — bulk uploads
   const [bulkUploading, setBulkUploading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const panInputRef = useRef<HTMLInputElement>(null);
+  const gstInputRef = useRef<HTMLInputElement>(null);
   const bulkFileInputRef = useRef<HTMLInputElement>(null);
   const bulkFolderInputRef = useRef<HTMLInputElement>(null);
 
@@ -219,13 +234,29 @@ export default function OnboardingWizard() {
       const text = await extractTextFromBlob(file, ext);
       let images: string[] = [];
 
-      if ((!text || text.length < 50) && ext === "pdf") {
-        images = await renderPdfPagesToImages(file, 5);
+      // Always render PDF pages as images — scanned PDFs have garbled text layers
+      // that fool the text-length check but are unreadable by AI
+      if (ext === "pdf") {
+        images = await renderPdfPagesToImages(file, 3);
       }
 
-      if (!text && images.length === 0 && ext !== "pdf") {
-        throw new Error("Could not extract text from this document.");
+      // Handle image files (JPG/PNG scans)
+      if (["jpg", "jpeg", "png"].includes(ext)) {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const b64 = base64.split(",")[1];
+        if (b64) images = [b64];
       }
+
+      if (!text && images.length === 0) {
+        throw new Error("Could not extract text from this document. Try a different file format.");
+      }
+
+      console.log("[Onboarding] Sending to API:", { text: text ? text.length + " chars" : "none", images: images.length + " images", imageSizes: images.map((i: string) => Math.round(i.length / 1024) + "KB") });
 
       const res = await fetch("/api/vault/extract-onboarding", {
         method: "POST",
@@ -246,13 +277,15 @@ export default function OnboardingWizard() {
 
       const data = await res.json();
 
+      console.log("[Onboarding] Extraction result:", JSON.stringify(data));
+
       // Populate review fields
       setExtractedName(data.companyName || "");
-      setExtractedGstin(data.gstin || "");
       setExtractedAddress(data.registeredAddress || "");
       setExtractedPartners(data.partners || []);
-      // PAN from incorporation doc goes to extractedPan as a starting point
       if (data.pan) setExtractedPan(data.pan);
+      if (data.yearOfEstablishment) setYearOfEstablishment(String(data.yearOfEstablishment));
+      if (data.stateCity) setStateCity(data.stateCity);
 
       setExtracting(false);
       goNext(); // → Step 1 (Review)
@@ -275,6 +308,7 @@ export default function OnboardingWizard() {
     setPanExtracting(true);
     setPanError("");
     setPanExtracted(false);
+    setPanPreview(null);
 
     try {
       await saveFile(id, file, "extracting");
@@ -282,22 +316,24 @@ export default function OnboardingWizard() {
       const text = await extractTextFromBlob(file, ext);
       let images: string[] = [];
 
-      // For PAN card — likely a scanned image/PDF
-      if ((!text || text.length < 20) && (ext === "pdf" || ext === "jpg" || ext === "jpeg" || ext === "png")) {
-        if (ext === "pdf") {
-          images = await renderPdfPagesToImages(file, 2);
-        } else {
-          // Image file — convert to base64
-          const reader = new FileReader();
-          const base64 = await new Promise<string>((resolve, reject) => {
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          });
-          // Strip data URL prefix
-          const b64 = base64.split(",")[1];
-          if (b64) images = [b64];
-        }
+      // PAN card — always render images (scanned docs have unreliable text)
+      if (ext === "pdf") {
+        images = await renderPdfPagesToImages(file, 2);
+      } else if (["jpg", "jpeg", "png"].includes(ext)) {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const b64 = base64.split(",")[1];
+        if (b64) images = [b64];
+      }
+
+      // Set preview image (first page/image)
+      if (images.length > 0) {
+        const preview = images[0].startsWith("data:") ? images[0] : `data:image/jpeg;base64,${images[0]}`;
+        setPanPreview(preview);
       }
 
       const res = await fetch("/api/vault/extract-onboarding", {
@@ -330,8 +366,74 @@ export default function OnboardingWizard() {
     }
   };
 
-  // ─── Step 1: Confirm Incorporation Data → Lock ───
-  // ─── Step 2: Confirm PAN → Save Profile ───
+  // ─── Step 3: Upload GST Certificate & Extract ───
+
+  const handleGstUpload = async (file: File) => {
+    const id = crypto.randomUUID();
+    const ext = file.name.split(".").pop()?.toLowerCase() || "pdf";
+
+    setGstFile({ id, name: file.name, blob: file, fileType: ext });
+    setGstExtracting(true);
+    setGstError("");
+    setGstExtracted(false);
+    setGstPreview(null);
+
+    try {
+      await saveFile(id, file, "extracting");
+
+      const text = await extractTextFromBlob(file, ext);
+      let images: string[] = [];
+
+      if (ext === "pdf") {
+        images = await renderPdfPagesToImages(file, 2);
+      } else if (["jpg", "jpeg", "png"].includes(ext)) {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        const b64 = base64.split(",")[1];
+        if (b64) images = [b64];
+      }
+
+      // Set preview image (first page/image)
+      if (images.length > 0) {
+        const preview = images[0].startsWith("data:") ? images[0] : `data:image/jpeg;base64,${images[0]}`;
+        setGstPreview(preview);
+      }
+
+      const res = await fetch("/api/vault/extract-onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: text || undefined,
+          images: images.length > 0 ? images : undefined,
+          fileName: file.name,
+          fileType: ext,
+          entityType,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("GST extraction failed");
+      }
+
+      const data = await res.json();
+
+      if (data.gstin) setExtractedGstin(data.gstin);
+      setGstExtracting(false);
+      setGstExtracted(true);
+    } catch (err) {
+      console.error("[Onboarding] GST extraction failed:", err);
+      setGstError(
+        err instanceof Error ? err.message : "Extraction failed. Please try again."
+      );
+      setGstExtracting(false);
+    }
+  };
+
+  // ─── Confirm & Save Profile (after GST step) ───
 
   const handleConfirmProfile = async () => {
     if (!uploadedFile) return;
@@ -375,7 +477,6 @@ export default function OnboardingWizard() {
     addDocument(docMeta);
     await saveMetadata(uploadedFile.id, {
       companyName: extractedName,
-      gstin: extractedGstin,
       registeredAddress: extractedAddress,
       partners: extractedPartners,
     }, "done");
@@ -396,7 +497,23 @@ export default function OnboardingWizard() {
       await saveMetadata(panFile.id, { pan: extractedPan }, "done");
     }
 
-    goNext(); // → Step 3
+    // Also save GST file if uploaded
+    if (gstFile) {
+      const gstDocMeta: VaultDocumentMeta = {
+        id: gstFile.id,
+        name: gstFile.name,
+        category: "Registration Certificates",
+        fileType: gstFile.fileType,
+        fileSize: gstFile.blob.size,
+        uploadedAt: new Date().toISOString(),
+        extractionStatus: "done",
+        isOnboardingDoc: true,
+      };
+      addDocument(gstDocMeta);
+      await saveMetadata(gstFile.id, { gstin: extractedGstin }, "done");
+    }
+
+    goNext(); // → Step 4
   };
 
   // ─── Steps 3 & 4: Bulk Upload ───
@@ -454,7 +571,7 @@ export default function OnboardingWizard() {
 
   const handleFinishOnboarding = () => {
     setOnboardingComplete(true);
-    setOnboardingStep(5);
+    setOnboardingStep(6);
   };
 
   // ─── Partner chip helpers ───
@@ -502,8 +619,9 @@ export default function OnboardingWizard() {
             {step === 0 && "Select entity type & upload document"}
             {step === 1 && "Review extracted company data"}
             {step === 2 && "Upload your PAN card"}
-            {step === 3 && "Upload registration & financial documents"}
-            {step === 4 && "Upload experience & work orders"}
+            {step === 3 && "Upload your GST certificate"}
+            {step === 4 && "Upload registration & financial documents"}
+            {step === 5 && "Upload experience & work orders"}
           </h1>
           <p className="text-sm text-slate-500 mt-2 max-w-md mx-auto">
             {step === 0 &&
@@ -513,13 +631,15 @@ export default function OnboardingWizard() {
             {step === 2 &&
               "Upload your PAN card — AI will extract your PAN number."}
             {step === 3 &&
-              "These help auto-match RFP eligibility and fill financial forms."}
+              "Upload your GST certificate — AI will extract your GSTIN."}
             {step === 4 &&
+              "These help auto-match RFP eligibility and fill financial forms."}
+            {step === 5 &&
               "LOAs and experience certificates build your project portfolio."}
           </p>
         </div>
 
-        <StepIndicator current={step} total={5} />
+        <StepIndicator current={step} total={6} />
 
         {/* ═══ STEP 0: Entity Type + Upload Incorporation Doc ═══ */}
         {step === 0 && (
@@ -654,9 +774,19 @@ export default function OnboardingWizard() {
             <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/[0.05] border border-emerald-500/15 rounded-xl">
               <Sparkles size={14} className="text-emerald-400 shrink-0" />
               <p className="text-xs text-emerald-300/70">
-                AI extracted this from your {entityConfig?.docName || "document"}. Edit anything that&apos;s wrong.
+                AI extracted this from <span className="font-medium text-emerald-300">{uploadedFile?.name || "your document"}</span>. Edit anything that&apos;s wrong.
               </p>
             </div>
+
+            {/* Warning if some fields are empty */}
+            {(!extractedName && !extractedAddress && extractedPartners.length === 0) && (
+              <div className="flex items-center gap-2 px-3 py-2 bg-amber-500/[0.07] border border-amber-500/20 rounded-xl">
+                <AlertCircle size={14} className="text-amber-400 shrink-0" />
+                <p className="text-xs text-amber-300/70">
+                  Extraction returned limited data. Please fill in the fields manually.
+                </p>
+              </div>
+            )}
 
             <div className="bg-slate-800/30 border border-slate-700/30 rounded-2xl p-5 space-y-4">
               {/* Company Name */}
@@ -669,21 +799,6 @@ export default function OnboardingWizard() {
                   value={extractedName}
                   onChange={(e) => setExtractedName(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-900/50 border border-slate-700/40 rounded-lg text-sm text-white focus:outline-none focus:border-indigo-500/50"
-                />
-              </div>
-
-              {/* GSTIN */}
-              <div>
-                <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">
-                  GSTIN
-                </label>
-                <input
-                  type="text"
-                  value={extractedGstin}
-                  onChange={(e) => setExtractedGstin(e.target.value.toUpperCase())}
-                  placeholder="15-digit GST number"
-                  maxLength={15}
-                  className="w-full px-3 py-2 bg-slate-900/50 border border-slate-700/40 rounded-lg text-sm text-white font-mono focus:outline-none focus:border-indigo-500/50"
                 />
               </div>
 
@@ -860,13 +975,29 @@ export default function OnboardingWizard() {
                 </div>
               ) : panFile && panExtracted ? (
                 <div className="flex flex-col items-center gap-3">
-                  <div className="w-12 h-12 bg-emerald-500/10 rounded-xl flex items-center justify-center">
-                    <CreditCard size={24} className="text-emerald-400" />
-                  </div>
+                  {panPreview ? (
+                    <img
+                      src={panPreview}
+                      alt="PAN Card Preview"
+                      className="max-h-48 rounded-lg border border-slate-700/40 object-contain"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 bg-emerald-500/10 rounded-xl flex items-center justify-center">
+                      <CreditCard size={24} className="text-emerald-400" />
+                    </div>
+                  )}
                   <p className="text-sm text-white font-medium">
                     {panFile.name}
                   </p>
-                  <p className="text-xs text-slate-500">PAN extracted successfully</p>
+                  <p className="text-xs text-emerald-400 flex items-center gap-1">
+                    <Check size={10} /> PAN extracted successfully
+                  </p>
+                  <button
+                    onClick={() => panInputRef.current?.click()}
+                    className="text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors"
+                  >
+                    Re-upload
+                  </button>
                 </div>
               ) : panFile && panError ? (
                 <div className="flex flex-col items-center gap-3">
@@ -967,8 +1098,175 @@ export default function OnboardingWizard() {
                 Back
               </Button>
               <Button
-                onClick={handleConfirmProfile}
+                onClick={goNext}
                 disabled={!extractedPan || extractedPan.length !== 10}
+                className="flex-1 gap-2 bg-indigo-600 hover:bg-indigo-500 text-white h-11"
+              >
+                Continue
+                <ChevronRight size={16} />
+              </Button>
+              <Button
+                onClick={goNext}
+                variant="outline"
+                className="border-slate-700 text-slate-400"
+              >
+                Skip PAN
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ STEP 3: GST Certificate Upload ═══ */}
+        {step === 3 && (
+          <div className="space-y-5">
+            <div
+              className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all ${
+                gstFile && gstExtracted
+                  ? "border-emerald-500/30 bg-emerald-500/[0.03]"
+                  : "border-slate-700/50 bg-slate-800/20 hover:border-slate-600"
+              }`}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files[0]) {
+                  handleGstUpload(e.dataTransfer.files[0]);
+                }
+              }}
+            >
+              {gstExtracting ? (
+                <div className="flex flex-col items-center gap-3">
+                  <Loader2 size={32} className="text-indigo-400 animate-spin" />
+                  <p className="text-sm text-indigo-300">
+                    AI is reading your GST certificate...
+                  </p>
+                </div>
+              ) : gstFile && gstExtracted ? (
+                <div className="flex flex-col items-center gap-3">
+                  {gstPreview ? (
+                    <img
+                      src={gstPreview}
+                      alt="GST Certificate Preview"
+                      className="max-h-48 rounded-lg border border-slate-700/40 object-contain"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 bg-emerald-500/10 rounded-xl flex items-center justify-center">
+                      <FileText size={24} className="text-emerald-400" />
+                    </div>
+                  )}
+                  <p className="text-sm text-white font-medium">
+                    {gstFile.name}
+                  </p>
+                  <p className="text-xs text-emerald-400 flex items-center gap-1">
+                    <Check size={10} /> GSTIN extracted successfully
+                  </p>
+                  <button
+                    onClick={() => gstInputRef.current?.click()}
+                    className="text-xs text-slate-500 hover:text-slate-300 underline underline-offset-2 transition-colors"
+                  >
+                    Re-upload
+                  </button>
+                </div>
+              ) : gstFile && gstError ? (
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 bg-red-500/10 rounded-xl flex items-center justify-center">
+                    <FileText size={24} className="text-red-400" />
+                  </div>
+                  <p className="text-sm text-white">{gstFile.name}</p>
+                  <div className="px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg">
+                    <p className="text-xs text-red-400">{gstError}</p>
+                    <Button
+                      onClick={() => handleGstUpload(new File([gstFile.blob], gstFile.name))}
+                      size="sm"
+                      variant="outline"
+                      className="mt-2 text-xs border-red-500/30 text-red-400"
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-12 h-12 bg-slate-800 rounded-xl flex items-center justify-center">
+                    <FileText size={24} className="text-slate-500" />
+                  </div>
+                  <p className="text-sm text-slate-300">
+                    Drop your <span className="text-indigo-400 font-medium">GST certificate</span> here
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    PDF, image (JPG/PNG), or scanned copy
+                  </p>
+                  <Button
+                    onClick={() => gstInputRef.current?.click()}
+                    variant="outline"
+                    className="mt-2 border-slate-700 text-slate-300"
+                  >
+                    Select File
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            <input
+              ref={gstInputRef}
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.[0]) {
+                  handleGstUpload(e.target.files[0]);
+                }
+              }}
+            />
+
+            {/* Extracted GSTIN — editable */}
+            {(gstExtracted || extractedGstin) && (
+              <div className="bg-slate-800/30 border border-slate-700/30 rounded-2xl p-5">
+                <label className="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block">
+                  GSTIN
+                </label>
+                <input
+                  type="text"
+                  value={extractedGstin}
+                  onChange={(e) => setExtractedGstin(e.target.value.toUpperCase())}
+                  placeholder="15-digit GST number"
+                  maxLength={15}
+                  className="w-full px-3 py-2 bg-slate-900/50 border border-slate-700/40 rounded-lg text-sm text-white font-mono focus:outline-none focus:border-indigo-500/50"
+                />
+                {extractedGstin && extractedGstin.length === 15 && (
+                  <p className="text-xs text-emerald-400 mt-1.5 flex items-center gap-1">
+                    <Check size={10} /> Valid GSTIN format
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Option to type GSTIN manually */}
+            {!gstFile && !extractedGstin && (
+              <div className="bg-slate-800/30 border border-slate-700/30 rounded-2xl p-5">
+                <p className="text-xs text-slate-500 mb-2">Or enter GSTIN manually:</p>
+                <input
+                  type="text"
+                  value={extractedGstin}
+                  onChange={(e) => setExtractedGstin(e.target.value.toUpperCase())}
+                  placeholder="22AAAAA0000A1Z5"
+                  maxLength={15}
+                  className="w-full px-3 py-2 bg-slate-900/50 border border-slate-700/40 rounded-lg text-sm text-white font-mono focus:outline-none focus:border-indigo-500/50"
+                />
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <Button
+                onClick={goBack}
+                variant="outline"
+                className="border-slate-700 text-slate-400"
+              >
+                <ChevronLeft size={16} />
+                Back
+              </Button>
+              <Button
+                onClick={handleConfirmProfile}
+                disabled={!extractedGstin || extractedGstin.length !== 15}
                 className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-500 text-white h-11"
               >
                 <Check size={16} />
@@ -979,14 +1277,14 @@ export default function OnboardingWizard() {
                 variant="outline"
                 className="border-slate-700 text-slate-400"
               >
-                Skip PAN
+                Skip GST
               </Button>
             </div>
           </div>
         )}
 
-        {/* ═══ STEP 3: Registration & Financial Documents ═══ */}
-        {step === 3 && (
+        {/* ═══ STEP 4: Registration & Financial Documents ═══ */}
+        {step === 4 && (
           <div className="space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div
@@ -1088,8 +1386,8 @@ export default function OnboardingWizard() {
           </div>
         )}
 
-        {/* ═══ STEP 4: Experience & Work Orders ═══ */}
-        {step === 4 && (
+        {/* ═══ STEP 5: Experience & Work Orders ═══ */}
+        {step === 5 && (
           <div className="space-y-5">
             <div
               className="border-2 border-dashed border-slate-700/50 rounded-2xl p-8 text-center hover:border-slate-600 cursor-pointer transition-all"

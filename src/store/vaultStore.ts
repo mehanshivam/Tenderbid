@@ -12,6 +12,8 @@ import { deleteFile as deleteFromDB } from "@/lib/vaultDB";
 interface VaultState {
   documents: VaultDocumentMeta[];
   companyProfile: CompanyProfile | null;
+  onboardingComplete: boolean;
+  onboardingStep: number;
   isHydrated: boolean;
 
   // Document actions
@@ -29,6 +31,10 @@ interface VaultState {
   // Profile actions
   setCompanyProfile: (profile: CompanyProfile) => void;
 
+  // Onboarding actions
+  setOnboardingComplete: (val: boolean) => void;
+  setOnboardingStep: (step: number) => void;
+
   // Hydration
   setHydrated: () => void;
 }
@@ -38,6 +44,8 @@ export const useVaultStore = create<VaultState>()(
     (set, get) => ({
       documents: [],
       companyProfile: null,
+      onboardingComplete: false,
+      onboardingStep: 0,
       isHydrated: false,
 
       addDocument: (doc) => {
@@ -76,6 +84,14 @@ export const useVaultStore = create<VaultState>()(
 
       setCompanyProfile: (profile) => {
         set({ companyProfile: profile });
+      },
+
+      setOnboardingComplete: (val) => {
+        set({ onboardingComplete: val });
+      },
+
+      setOnboardingStep: (step) => {
+        set({ onboardingStep: step });
       },
 
       setHydrated: () => {

@@ -32,6 +32,17 @@ const typeColors: Record<string, string> = {
   other: "bg-gray-50 text-gray-700",
 };
 
+const tagColors: Record<string, string> = {
+  "Needs Notarization": "bg-red-50 text-red-700 border-red-200",
+  "Needs Stamp Paper": "bg-amber-50 text-amber-700 border-amber-200",
+  "Needs Company Seal": "bg-blue-50 text-blue-700 border-blue-200",
+  "Needs Attestation": "bg-emerald-50 text-emerald-700 border-emerald-200",
+  "Needs Affidavit": "bg-rose-50 text-rose-700 border-rose-200",
+  "Needs Witness Signature": "bg-violet-50 text-violet-700 border-violet-200",
+  "Needs Court Fee Stamp": "bg-orange-50 text-orange-700 border-orange-200",
+  "Needs Board Resolution": "bg-cyan-50 text-cyan-700 border-cyan-200",
+};
+
 export function FormEditor({ form, onCitationClick }: FormEditorProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -62,7 +73,7 @@ export function FormEditor({ form, onCitationClick }: FormEditorProps) {
       const res = await fetch("/api/export-docx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html, filename: form.title }),
+        body: JSON.stringify({ html, filename: form.title, tags: form.tags }),
       });
       if (!res.ok) throw new Error("Export failed");
       const blob = await res.blob();
@@ -140,6 +151,20 @@ export function FormEditor({ form, onCitationClick }: FormEditorProps) {
           {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
         </div>
       </div>
+
+      {/* Tags */}
+      {!collapsed && form.tags && form.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-3 py-2 border-b border-gray-100 bg-amber-50/30">
+          {form.tags.map((tag) => (
+            <span
+              key={tag}
+              className={`text-[10px] px-2 py-0.5 rounded-full border font-medium ${tagColors[tag] || "bg-gray-50 text-gray-600 border-gray-200"}`}
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
 
       {!collapsed && (
         <>

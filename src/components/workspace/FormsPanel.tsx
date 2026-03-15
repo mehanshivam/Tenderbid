@@ -67,7 +67,7 @@ export function FormsPanel({ documentText, onCitationClick }: FormsPanelProps) {
         const res = await fetch("/api/export-docx", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ html, filename: form.title }),
+          body: JSON.stringify({ html, filename: form.title, tags: form.tags }),
         });
         if (!res.ok) continue;
         const blob = await res.blob();
@@ -186,6 +186,14 @@ export function FormsPanel({ documentText, onCitationClick }: FormsPanelProps) {
       <div className="shrink-0 flex items-center justify-between px-4 py-2 border-b border-gray-100">
         <span className="text-xs text-gray-500">
           {forms.length} form{forms.length !== 1 ? "s" : ""} found
+          {(() => {
+            const allTags = new Set(forms.flatMap((f) => f.tags || []));
+            return allTags.size > 0 ? (
+              <span className="text-amber-600 ml-1">
+                &middot; {allTags.size} requirement{allTags.size !== 1 ? "s" : ""} detected
+              </span>
+            ) : null;
+          })()}
         </span>
         <div className="flex items-center gap-2">
           <Button

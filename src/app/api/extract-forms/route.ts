@@ -2,6 +2,17 @@ import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
 
+const formTagEnum = z.enum([
+  "Needs Notarization",
+  "Needs Stamp Paper",
+  "Needs Company Seal",
+  "Needs Attestation",
+  "Needs Affidavit",
+  "Needs Witness Signature",
+  "Needs Court Fee Stamp",
+  "Needs Board Resolution",
+]);
+
 const formSchema = z.object({
   forms: z.array(
     z.object({
@@ -12,6 +23,11 @@ const formSchema = z.object({
         .string()
         .describe(
           "The COMPLETE form content as HTML that a bidder would print and fill out. Use <table>, <tr>, <td>, <th> for tables. Use <p> for paragraphs, <h3> for section titles, <strong> for labels. For blank fields / lines that bidders need to fill, use <input> style placeholders like _____________ or [TO BE FILLED]. Preserve the EXACT original structure, all rows, all fields. Do NOT summarize or truncate."
+        ),
+      tags: z
+        .array(formTagEnum)
+        .describe(
+          "Requirements detected from the form text. Look for mentions of: notarization/notary, stamp paper (judicial/non-judicial), company seal/rubber stamp, attestation by gazetted officer, affidavit, witness signatures, court fee stamps, board resolution/authority letter."
         ),
     })
   ),
@@ -60,9 +76,20 @@ CRITICAL INSTRUCTIONS:
 
 3. sourcePages: Use the [Page X] markers in the document to identify which pages each form spans.
 
-4. ORDERING: Extract in document order.
+4. TAGS — For each form, detect special requirements by scanning for these keywords:
+   - "Needs Notarization" — if form mentions "notarized", "notary", "notarization"
+   - "Needs Stamp Paper" — if form mentions "stamp paper", "non-judicial stamp", "judicial stamp paper", "on Rs. __ stamp paper"
+   - "Needs Company Seal" — if form mentions "company seal", "rubber stamp", "office seal", "seal of the firm"
+   - "Needs Attestation" — if form mentions "attested", "attestation", "gazetted officer", "self-attested"
+   - "Needs Affidavit" — if form mentions "affidavit", "sworn statement"
+   - "Needs Witness Signature" — if form mentions "witness", "witnessed by"
+   - "Needs Court Fee Stamp" — if form mentions "court fee", "court stamp"
+   - "Needs Board Resolution" — if form mentions "board resolution", "authorized signatory", "authority letter"
+   Include ALL applicable tags. If none apply, return an empty array.
 
-5. DO NOT extract the tender notice itself, instructions, or eligibility criteria — only extract fillable forms/annexures.
+5. ORDERING: Extract in document order.
+
+6. DO NOT extract the tender notice itself, instructions, or eligibility criteria — only extract fillable forms/annexures.
 
 Return ALL forms found. If there are no forms, return an empty array.`,
     });

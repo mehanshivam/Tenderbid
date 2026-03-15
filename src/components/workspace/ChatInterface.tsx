@@ -3,7 +3,7 @@
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { useRef, useEffect, useState, useMemo } from "react";
-import { Send, Bot, User, FileText } from "lucide-react";
+import { Send, Bot, User, FileText, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import ReactMarkdown from "react-markdown";
@@ -73,10 +73,12 @@ export function ChatInterface({ tenderId, documentContext, onCitationClick }: Ch
     }
   }, [messages]);
 
+  const isReady = !!documentContext;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = inputValue.trim();
-    if (!text || isLoading) return;
+    if (!text || isLoading || !isReady) return;
     setInputValue("");
     sendMessage({ text });
   };
@@ -99,11 +101,23 @@ export function ChatInterface({ tenderId, documentContext, onCitationClick }: Ch
         )}
         {messages.length === 0 && !error && (
           <div className="text-center py-8 text-gray-400">
-            <Bot size={32} className="mx-auto mb-2 opacity-50" />
-            <p className="text-sm">Ask about this tender</p>
-            <p className="text-xs mt-1">
-              I can help with eligibility, requirements, bid preparation
-            </p>
+            {!documentContext ? (
+              <>
+                <Loader2 size={32} className="mx-auto mb-2 opacity-50 animate-spin text-indigo-400" />
+                <p className="text-sm text-indigo-500">Extracting document text…</p>
+                <p className="text-xs mt-1">
+                  Please wait while I read the document
+                </p>
+              </>
+            ) : (
+              <>
+                <Bot size={32} className="mx-auto mb-2 opacity-50" />
+                <p className="text-sm">Ask about this tender</p>
+                <p className="text-xs mt-1">
+                  I can help with eligibility, requirements, bid preparation
+                </p>
+              </>
+            )}
           </div>
         )}
 
@@ -188,14 +202,14 @@ export function ChatInterface({ tenderId, documentContext, onCitationClick }: Ch
         <Input
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
-          placeholder="Ask about this tender..."
+          placeholder={isReady ? "Ask about this tender..." : "Extracting document…"}
           className="h-9 text-sm"
-          disabled={isLoading}
+          disabled={isLoading || !isReady}
         />
         <Button
           type="submit"
           size="sm"
-          disabled={isLoading || !inputValue.trim()}
+          disabled={isLoading || !isReady || !inputValue.trim()}
           className="h-9 px-3"
         >
           <Send size={14} />
