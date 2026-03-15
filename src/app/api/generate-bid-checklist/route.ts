@@ -4,18 +4,44 @@ import { z } from "zod";
 
 export const maxDuration = 60;
 
+const formTagValues = [
+  "Needs Notarization",
+  "Needs Stamp Paper",
+  "Needs Company Seal",
+  "Needs Attestation",
+  "Needs Affidavit",
+  "Needs Witness Signature",
+  "Needs Court Fee Stamp",
+  "Needs Board Resolution",
+  "On Company Letterhead",
+] as const;
+
 const bidChecklistSchema = z.object({
   items: z.array(
     z.object({
       name: z
         .string()
-        .describe("Short category name, 2-4 words (e.g. 'Cover Letter', 'General Documents', 'Financial Capacity')"),
+        .describe(
+          "Short category name. For annexures, use format 'Annexure-X: Title' (e.g. 'Annexure-1: Bidding Capacity'). For documents, use 2-4 words (e.g. 'Registration Certificate', 'Financial Documents')."
+        ),
       particular: z
         .string()
-        .describe("Comma-separated list of specific items needed under this category"),
+        .describe(
+          "Comma-separated list of specific items/fields needed under this category. For annexures, describe what needs to be filled."
+        ),
       sourcePages: z
         .array(z.number())
         .describe("RFP page numbers where these requirements are mentioned"),
+      type: z
+        .enum(["document", "annexure"])
+        .describe(
+          "'annexure' for forms/annexures/declarations that the bidder must fill out and submit. 'document' for existing documents to collect (certificates, balance sheets, etc.)"
+        ),
+      tags: z
+        .array(z.enum(formTagValues))
+        .describe(
+          "Special requirements for this item. Detect from the document text: stamp paper, notarization, company letterhead, company seal, affidavit, witness signature, court fee stamp, board resolution."
+        ),
     })
   ),
 });
@@ -44,31 +70,50 @@ export async function POST(req: Request) {
     const result = await generateObject({
       model: google("gemini-2.5-flash"),
       schema: bidChecklistSchema,
-      prompt: `You are a tender bid preparation expert for Indian government tenders. Analyze this RFP and create a consolidated bid preparation checklist.
+      prompt: `You are a tender bid preparation expert for Indian government tenders. Analyze this RFP and create a comprehensive bid preparation checklist.
 
 TENDER DOCUMENT:
 ${documentContext.slice(0, 80000)}
 ${vaultContext}
 
-TASK: Create a checklist of 8-15 items that a bidder must prepare and submit. Group related requirements into logical bid preparation categories.
+TASK: Create a checklist of ALL items a bidder must prepare and submit. This checklist is the single source of truth for the bid preparation team.
 
-RULES:
-1. Each item should be a logical GROUP of related documents/requirements, not individual items
-2. Use short names (2-4 words): "Cover Letter", "Drafts Fees & EMD", "General Documents", "CA Certificate", "Financial Capacity", "Experience Certificates", "Similar Work Orders", "Manpower Details", "Technical Presentation", "Company Profile", "Affidavits & Declarations", "Power of Attorney", etc.
-3. The "particular" field should list the specific sub-items in that category, comma-separated
-4. Include ALL requirements from the RFP — eligibility criteria, documents, forms, annexures
-5. Use [Page X] markers from the document to populate sourcePages accurately
-6. Order items logically: administrative docs first, then eligibility/financial, then technical, then forms
-7. Target 8-15 items total. Merge small related items together.
+CRITICAL RULES:
+
+1. **ANNEXURES MUST BE SEPARATE**: Each annexure, declaration, affidavit, or fillable form mentioned in the RFP MUST be its own separate checklist item. NEVER merge multiple annexures into one item. If the document has Annexure-1, Annexure-2, Annexure-3, etc., each gets its own row.
+
+2. **TYPE FIELD**:
+   - type="annexure" for any form, annexure, declaration, affidavit, schedule, or format that the bidder must FILL OUT and submit
+   - type="document" for existing documents to COLLECT (certificates, balance sheets, work orders, etc.)
+
+3. **NAMING**:
+   - For annexures: "Annexure-X: [Short Title]" (e.g., "Annexure-1: Bidding Capacity", "Annexure-3: Not Blacklisted Declaration")
+   - For documents: Short category name, 2-4 words (e.g., "Registration Certificate", "Financial Documents")
+
+4. **TAGS** — Detect special requirements from the document text and tag items:
+   - "Needs Stamp Paper" — if the document says "stamp paper", "non-judicial stamp paper", "Rs.100 stamp paper"
+   - "On Company Letterhead" — if it says "letterhead", "printed on bidder's letter head"
+   - "Needs Notarization" — if it says "notarized", "notary"
+   - "Needs Company Seal" — if it says "company seal", "firm seal"
+   - "Needs Affidavit" — if the form IS an affidavit
+   - "Needs Attestation" — if it says "attested", "attestation"
+   - "Needs Witness Signature" — if it says "witness"
+   - "Needs Board Resolution" — if it says "board resolution"
+
+5. **PARTICULAR FIELD**: For annexures, describe exactly what the team member needs to fill in. For documents, list the specific sub-items needed.
+
+6. **ORDERING**: Documents first (administrative, then eligibility, then financial, then technical), then annexures in their numbered order.
+
+7. **SOURCE PAGES**: Use [Page X] markers from the document to populate sourcePages accurately.
+
+8. Target 10-20 items total. Group related DOCUMENTS together but keep each ANNEXURE separate.
 
 EXAMPLE OUTPUT:
-- name: "Cover Letter", particular: "On company letterhead, signed by authorized signatory, referencing tender number"
-- name: "Drafts Fees & EMD", particular: "Demand Draft for EMD Rs. X, Tender fee DD Rs. Y, in favour of [org]"
-- name: "General Documents", particular: "Registration certificate, Partnership Deed, PAN card, GST certificate, ESI/PF registration"
-- name: "CA Certificate", particular: "Chartered Accountant certified turnover certificate for last 3-5 financial years"
-- name: "Financial Capacity", particular: "Audited Balance Sheet & P&L for last 3 years, Net Worth certificate"
-- name: "Experience Certificates", particular: "Work completion certificates, appreciation letters from past projects"
-- name: "Similar Work Orders", particular: "Minimum X completed similar projects of value Rs. Y each, with work order copies"
+- name: "Bid Processing Fees & EMD", type: "document", particular: "Demand Draft for bid fee Rs. 2000+300+GST, DD for EMD Rs. 46 Lakhs, in favour of Secretary BSGUP", tags: []
+- name: "Registration Certificate", type: "document", particular: "Certificate of Incorporation under Companies Act / LLP Act / Partnership deed", tags: []
+- name: "Annexure-1: Bidding Capacity", type: "annexure", particular: "Calculate bidding capacity using formula A×N×2-B, fill firm name, work name, capacity amount", tags: ["Needs Stamp Paper"]
+- name: "Annexure-3: Not Blacklisted Declaration", type: "annexure", particular: "Declaration on company letterhead that firm has not been blacklisted by any Govt/Semi-Govt", tags: ["On Company Letterhead"]
+- name: "Annexure-6: General Affidavit", type: "annexure", particular: "Affidavit certifying truthfulness of statements, no abandoned work, bid valid for 90 days", tags: ["Needs Stamp Paper", "Needs Affidavit"]
 
 Return ALL items needed for a complete bid submission.`,
     });

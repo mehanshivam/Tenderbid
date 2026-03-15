@@ -286,7 +286,15 @@ export interface BidChecklistItem {
   name: string;
   particular: string;
   sourcePages: number[];
-  status: "pending" | "approved";
+  status: "pending" | "uploaded" | "approved";
+  type: "document" | "annexure";
+  tags: FormTag[];
+  uploadedFile?: {
+    name: string;
+    size: number;
+    uploadedAt: string;
+    dbId: string;
+  };
 }
 
 /** Maps common folder names to vault categories for auto-categorization */
