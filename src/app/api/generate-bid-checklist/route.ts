@@ -1,6 +1,7 @@
 import { generateObject } from "ai";
 import { google } from "@ai-sdk/google";
 import { z } from "zod";
+import { trackApiCall, calculateCost } from "@/lib/apiTracker";
 
 export const maxDuration = 60;
 
@@ -48,6 +49,7 @@ const bidChecklistSchema = z.object({
 
 export async function POST(req: Request) {
   const { documentContext, companyProfile, vaultDocuments } = await req.json();
+  const startTime = Date.now();
 
   if (!documentContext) {
     return Response.json(
@@ -66,11 +68,7 @@ export async function POST(req: Request) {
       }`
     : "";
 
-  try {
-    const result = await generateObject({
-      model: google("gemini-2.5-flash"),
-      schema: bidChecklistSchema,
-      prompt: `You are a tender bid preparation expert for Indian government tenders. Analyze this RFP and create a comprehensive bid preparation checklist.
+  const prompt = `You are a tender bid preparation expert for Indian government tenders. Analyze this RFP and create a comprehensive bid preparation checklist.
 
 TENDER DOCUMENT:
 ${documentContext.slice(0, 80000)}
@@ -115,7 +113,39 @@ EXAMPLE OUTPUT:
 - name: "Annexure-3: Not Blacklisted Declaration", type: "annexure", particular: "Declaration on company letterhead that firm has not been blacklisted by any Govt/Semi-Govt", tags: ["On Company Letterhead"]
 - name: "Annexure-6: General Affidavit", type: "annexure", particular: "Affidavit certifying truthfulness of statements, no abandoned work, bid valid for 90 days", tags: ["Needs Stamp Paper", "Needs Affidavit"]
 
-Return ALL items needed for a complete bid submission.`,
+Return ALL items needed for a complete bid submission.`;
+
+  const inputChars = prompt.length;
+
+  try {
+    const result = await generateObject({
+      model: google("gemini-2.5-flash"),
+      schema: bidChecklistSchema,
+      prompt,
+      temperature: 0,
+    });
+
+    const durationMs = Date.now() - startTime;
+    const promptTokens = result.usage?.inputTokens ?? 0;
+    const completionTokens = result.usage?.outputTokens ?? 0;
+    const cost = calculateCost("gemini-2.5-flash", promptTokens, completionTokens);
+
+    await trackApiCall({
+      endpoint: "/api/generate-bid-checklist",
+      model: "gemini-2.5-flash",
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      imageCount: 0,
+      estimatedCostUSD: cost.usd,
+      estimatedCostINR: cost.inr,
+      durationMs,
+      status: "success",
+      inputChars,
+      page: "Bid Workspace - Workflow",
+      triggerType: "click",
+      promptSummary: "Bid preparation checklist — extracts documents + annexures from RFP with tags",
+      promptText: prompt,
     });
 
     const items = result.object.items.map((item, i) => ({
@@ -126,6 +156,25 @@ Return ALL items needed for a complete bid submission.`,
 
     return Response.json({ items });
   } catch (e) {
+    const durationMs = Date.now() - startTime;
+    await trackApiCall({
+      endpoint: "/api/generate-bid-checklist",
+      model: "gemini-2.5-flash",
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      imageCount: 0,
+      estimatedCostUSD: 0,
+      estimatedCostINR: 0,
+      durationMs,
+      status: "error",
+      errorMessage: e instanceof Error ? e.message : "Unknown error",
+      inputChars,
+      page: "Bid Workspace - Workflow",
+      triggerType: "click",
+      promptSummary: "Bid preparation checklist — failed",
+      promptText: prompt,
+    });
     console.error("Bid checklist generation failed:", e);
     return Response.json(
       { error: "Failed to generate bid checklist" },

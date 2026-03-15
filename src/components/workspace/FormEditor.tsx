@@ -22,6 +22,7 @@ import type { ExtractedForm } from "@/lib/types";
 interface FormEditorProps {
   form: ExtractedForm;
   onCitationClick?: (page: number) => void;
+  fullHeight?: boolean;
 }
 
 const typeColors: Record<string, string> = {
@@ -43,7 +44,7 @@ const tagColors: Record<string, string> = {
   "Needs Board Resolution": "bg-cyan-50 text-cyan-700 border-cyan-200",
 };
 
-export function FormEditor({ form, onCitationClick }: FormEditorProps) {
+export function FormEditor({ form, onCitationClick, fullHeight }: FormEditorProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
@@ -91,7 +92,7 @@ export function FormEditor({ form, onCitationClick }: FormEditorProps) {
   };
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+    <div className={`border border-gray-200 overflow-hidden bg-white ${fullHeight ? "flex flex-col h-full" : "rounded-lg"}`}>
       {/* Header */}
       <div
         className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-200 cursor-pointer"
@@ -213,7 +214,7 @@ export function FormEditor({ form, onCitationClick }: FormEditorProps) {
           </div>
 
           {/* Editor */}
-          <div className="max-h-[400px] overflow-auto">
+          <div className={`overflow-auto ${fullHeight ? "flex-1 min-h-0" : "max-h-[400px]"}`}>
             <EditorContent editor={editor} />
           </div>
         </>

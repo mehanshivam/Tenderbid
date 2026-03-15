@@ -44,11 +44,25 @@ export default function UploadWorkspacePage() {
 
   // Form extraction state
   const [extractedForms, setExtractedForms] = useState<ExtractedForm[]>([]);
+  const [formsExtracting, setFormsExtracting] = useState(false);
   const formsExtractedRef = useRef(false);
 
   // Tab state for center panel
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTab, setActiveTab] = useState<"preview" | string>("preview");
+
+  // Reset state when a new file is selected
+  const prevFileRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (selectedFile && selectedFile.blobUrl !== prevFileRef.current) {
+      prevFileRef.current = selectedFile.blobUrl;
+      setDocumentText("");
+      setExtractedForms([]);
+      formsExtractedRef.current = false;
+      setOpenTabs([]);
+      setActiveTab("preview");
+    }
+  }, [selectedFile]);
 
   // Redirect if no files uploaded, auto-select first PDF
   useEffect(() => {
@@ -66,6 +80,7 @@ export default function UploadWorkspacePage() {
     formsExtractedRef.current = true;
 
     (async () => {
+      setFormsExtracting(true);
       try {
         const res = await fetch("/api/extract-forms", {
           method: "POST",
@@ -81,6 +96,8 @@ export default function UploadWorkspacePage() {
         setExtractedForms(forms);
       } catch {
         // Silent fail — forms are a bonus feature
+      } finally {
+        setFormsExtracting(false);
       }
     })();
   }, [documentText]);
@@ -140,6 +157,15 @@ export default function UploadWorkspacePage() {
     [extractedForms]
   );
 
+  // Open a specific extracted form in a new tab
+  const handleOpenForm = useCallback((form: ExtractedForm) => {
+    setOpenTabs((prev) => {
+      if (prev.find((t) => t.id === form.id)) return prev;
+      return [...prev, { id: form.id, title: form.title, form }];
+    });
+    setActiveTab(form.id);
+  }, []);
+
   const handleCloseTab = useCallback(
     (tabId: string) => {
       setOpenTabs((prev) => prev.filter((t) => t.id !== tabId));
@@ -178,7 +204,10 @@ export default function UploadWorkspacePage() {
                 tenderName={tenderName}
                 fileCount={files.length}
                 documentText={documentText}
+                extractedForms={extractedForms}
+                isExtracting={formsExtracting}
                 onPreviewItem={handlePreviewItem}
+                onOpenForm={handleOpenForm}
               />
             </div>
           </Panel>
@@ -254,6 +283,7 @@ export default function UploadWorkspacePage() {
                     <FormEditor
                       form={tab.form}
                       onCitationClick={handleCitationClick}
+                      fullHeight
                     />
                   </div>
                 ))}
@@ -267,6 +297,7 @@ export default function UploadWorkspacePage() {
           <Panel id="chat" defaultSize="25%" minSize="18%" maxSize="35%">
             <div className="h-full overflow-hidden bg-white border-l border-gray-200">
               <ChatInterface
+                key={selectedFile?.blobUrl ?? "none"}
                 tenderId="upload"
                 documentContext={documentText}
                 onCitationClick={handleCitationClick}
